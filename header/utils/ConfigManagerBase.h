@@ -3,6 +3,7 @@
 
 #include <QSettings>
 #include <QProcess>
+#include <QFile>
 
 class ConfigManagerBase : public QObject {
     Q_OBJECT

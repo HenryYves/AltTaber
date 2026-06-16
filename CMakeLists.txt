@@ -83,6 +83,7 @@ target_link_libraries(Win_Switcher
 
 target_link_libraries(${PROJECT_NAME}
         Dwmapi
+        WindowsApp
 )
 
 # 启用`gui_private`模块
@@ -90,9 +91,8 @@ target_link_libraries(${PROJECT_NAME}
 target_include_directories(${PROJECT_NAME} PRIVATE ${Qt6Gui_PRIVATE_INCLUDE_DIRS})
 
 set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "AltTaber") # 设置输出文件名
-if (CMAKE_BUILD_TYPE MATCHES "Release")
-    set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE true) # 设置为窗口应用程序, 无控制台，同时会导致Clion无法捕获输出
-endif ()
+# 对于多配置生成器(VS)，WIN32_EXECUTABLE 通过vxproj属性控制，这里用生成器表达式为Release配置设置
+set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE true)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
         QT_DEPRECATED_WARNINGS

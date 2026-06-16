@@ -41,6 +41,20 @@ public:
         set("DisplayMonitor", monitor);
     }
 
+    /// User-configured blacklist of exe filenames to hide from the switcher.
+    /// In config.ini: [blacklist] \n file_names=app1.exe, app2.exe
+    QStringList getBlacklistFileNames() {
+        auto raw = get("blacklist/file_names", QStringList{}).toStringList();
+        QStringList result;
+        for (auto& item : raw) {
+            for (auto& sub : item.split(',')) {
+                auto trimmed = sub.trimmed();
+                if (!trimmed.isEmpty()) result << trimmed.toLower();
+            }
+        }
+        return result;
+    }
+
 private:
     explicit ConfigManager(const QString& filename) : ConfigManagerBase(filename) {}
 };
