@@ -350,17 +350,22 @@ bool Widget::prepareListWidget() {
 
     // set current item
     if (lw->count() >= 2) {
-        auto foreWin = GetForegroundWindow();
-        bool isFirstItemForeground = false;
-        for (auto& info: winGroupList.at(0).windows) {
-            if (info.hwnd == foreWin) {
-                isFirstItemForeground = true;
-                break;
+        // Alt+Shift+Tab: start from the last item instead of the second
+        if (Util::isKeyPressed(VK_SHIFT)) {
+            lw->setCurrentRow(lw->count() - 1);
+        } else {
+            auto foreWin = GetForegroundWindow();
+            bool isFirstItemForeground = false;
+            for (auto& info: winGroupList.at(0).windows) {
+                if (info.hwnd == foreWin) {
+                    isFirstItemForeground = true;
+                    break;
+                }
             }
+            // 如果第一个item是前台窗口，就选中第二个
+            // 因为有些情况：选中桌面 并不会产生一个item
+            lw->setCurrentRow(isFirstItemForeground ? 1 : 0); //! 首次显示时，该行特别耗时：472ms
         }
-        // 如果第一个item是前台窗口，就选中第二个
-        // 因为有些情况：选中桌面 并不会产生一个item
-        lw->setCurrentRow(isFirstItemForeground ? 1 : 0); //! 首次显示时，该行特别耗时：472ms
     } else if (lw->count() == 1) {
         lw->setCurrentRow(0);
     }
