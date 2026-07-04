@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
-set(CMAKE_PREFIX_PATH "D:/Qt/6.8.1/msvc2022_64/lib/cmake")
+set(CMAKE_PREFIX_PATH "D:/a_my/tool/Qt/6.8.1/msvc2022_64/lib/cmake")
 list(APPEND CMAKE_AUTOUIC_SEARCH_PATHS ui) # 如果.ui文件不在.cpp同一目录下，需要添加搜索路径
 
 # 设置版本信息变量
@@ -83,6 +83,7 @@ target_link_libraries(Win_Switcher
 
 target_link_libraries(${PROJECT_NAME}
         Dwmapi
+        WindowsApp
 )
 
 # 启用`gui_private`模块
@@ -90,9 +91,8 @@ target_link_libraries(${PROJECT_NAME}
 target_include_directories(${PROJECT_NAME} PRIVATE ${Qt6Gui_PRIVATE_INCLUDE_DIRS})
 
 set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "AltTaber") # 设置输出文件名
-if (CMAKE_BUILD_TYPE MATCHES "Release")
-    set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE true) # 设置为窗口应用程序, 无控制台，同时会导致Clion无法捕获输出
-endif ()
+# 对于多配置生成器(VS)，WIN32_EXECUTABLE 通过vxproj属性控制，这里用生成器表达式为Release配置设置
+set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE true)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
         QT_DEPRECATED_WARNINGS

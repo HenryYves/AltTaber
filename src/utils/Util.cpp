@@ -2,6 +2,7 @@
 #include "utils/Util.h"
 #include <appmodel.h>
 #include "utils/AppUtil.h"
+#include "utils/ConfigManager.h"
 #include <QDebug>
 #include <psapi.h>
 #include <QFileInfo>
@@ -263,10 +264,10 @@ namespace Util {
         static const QStringList BlackList_ExePath = {
             R"(C:\Windows\System32\wscript.exe)"
         };
-        static const QStringList BlackList_FileName = { // TODO by user from config
-            "Nahimic3.exe",
-            "Follower.exe",
-            "QQ Follower.exe"
+        static const QStringList DefaultBlackList_FileName = {
+            "nahimic3.exe",
+            "follower.exe",
+            "qq follower.exe"
         };
         LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
         QString className;
@@ -283,7 +284,10 @@ namespace Util {
             && !className.startsWith("imestatuspop_classname{") // 输入法（的推销弹窗）https://s3.bmp.ovh/imgs/2024/12/23/bb136fde101a41ce.png
         ) {
             auto path = getWindowProcessPath(hwnd); // 耗时操作，减少次数
-            if (!BlackList_ExePath.contains(path) && !BlackList_FileName.contains(QFileInfo(path).fileName()))
+            auto fileName = QFileInfo(path).fileName().toLower();
+            if (!BlackList_ExePath.contains(path)
+                && !DefaultBlackList_FileName.contains(fileName)
+                && !cfg.getBlacklistFileNames().contains(fileName))
                 return true;
         }
         return false;
