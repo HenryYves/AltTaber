@@ -253,13 +253,33 @@ QList<WindowGroup> Widget::prepareWindowGroupList() {
     }
     auto winGroupList = winGroupMap.values();
     // 按照活跃度排序
-    std::sort(winGroupList.begin(), winGroupList.end(), [this](const WindowGroup& a, const WindowGroup& b) {
-        auto timeA = getLastValidActiveGroupWindow(a).second;
-        auto timeB = getLastValidActiveGroupWindow(b).second;
-        if (timeA.isNull() && timeB.isNull()) return false;
-        if (timeA.isValid() && timeB.isValid()) return timeA > timeB;
-        return timeA.isValid();
-    });
+    if (cfg.getNewAppSortSecond()) {
+        // 启用"新应用排第二"：无使用记录的窗口组放到第2位（紧跟当前前台窗口）
+        QList<WindowGroup> withRecord, withoutRecord;
+        for (auto& group : winGroupList) {
+            if (getLastValidActiveGroupWindow(group).second.isValid())
+                withRecord.append(group);
+            else
+                withoutRecord.append(group);
+        }
+        std::sort(withRecord.begin(), withRecord.end(), [this](const WindowGroup& a, const WindowGroup& b) {
+            return getLastValidActiveGroupWindow(a).second > getLastValidActiveGroupWindow(b).second;
+        });
+        winGroupList = withRecord;
+        if (!withoutRecord.isEmpty()) {
+            // 插入到 index 1（第2位），保持无记录项之间的原有顺序
+            for (int i = 0; i < withoutRecord.size(); i++)
+                winGroupList.insert(1 + i, withoutRecord[i]);
+        }
+    } else {
+        std::sort(winGroupList.begin(), winGroupList.end(), [this](const WindowGroup& a, const WindowGroup& b) {
+            auto timeA = getLastValidActiveGroupWindow(a).second;
+            auto timeB = getLastValidActiveGroupWindow(b).second;
+            if (timeA.isNull() && timeB.isNull()) return false;
+            if (timeA.isValid() && timeB.isValid()) return timeA > timeB;
+            return timeA.isValid();
+        });
+    }
     return winGroupList;
 }
 

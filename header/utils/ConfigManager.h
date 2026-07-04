@@ -41,6 +41,13 @@ public:
         set("DisplayMonitor", monitor);
     }
 
+    /// When enabled, apps with no usage record are sorted to the second position
+    /// (right after the foreground window) instead of the end.
+    /// In config.ini: [sorting] \n new_app_second=true
+    bool getNewAppSortSecond() {
+        return get("sorting/new_app_second", false).toBool();
+    }
+
     /// User-configured blacklist of exe filenames to hide from the switcher.
     /// In config.ini: [blacklist] \n file_names=app1.exe, app2.exe
     QStringList getBlacklistFileNames() {
