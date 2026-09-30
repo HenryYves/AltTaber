@@ -113,6 +113,9 @@ private:
     const QMargins ListWidgetMargin{24, 24, 24, 24};
     WindowActivationOrder winActiveOrder_;
     QList<HWND> groupWindowOrder; // for Alt+` 同组窗口切换
+    /// GroupMode 期间"本组"的进程路径：动态扫描靠它过滤掉别的进程的新窗口。
+    /// 在 enterGroupMode() 里随 mode_ 一起设置，onNewWindows() 只读
+    QString currentGroupExePath_;
     Mode mode_ = Mode::AppMode;
     GroupWindowList* groupList_ = nullptr;   // 在构造函数里 new，parent 为 this
     WindowWatcher* watcher_ = nullptr;       // 同上；只在列表可见时运行

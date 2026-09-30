@@ -514,7 +514,32 @@ void Widget::hideEvent(QHideEvent* event) {
 }
 
 void Widget::onNewWindows(const QList<HWND>& added) {
-    if (mode_ != Mode::AppMode || !this->isVisible()) return;
+    // 守卫必须放宽成"只判可见性"，且模式分支要放在它**之后、AppMode 逻辑之前**：
+    // 原来那道守卫要求当前必须是 AppMode，会先把 GroupMode 挡回去，
+    // 于是下面这个分支成了死代码（本 Task 的顺序陷阱）
+    if (!this->isVisible()) return;
+
+    if (mode_ == Mode::GroupMode) {
+        // 只关心本进程（本组）的新窗口，别的程序的窗口不进组列表
+        int lastInserted = -1;
+        for (auto hwnd: added) {
+            if (Util::getWindowProcessPath(hwnd).compare(currentGroupExePath_, Qt::CaseInsensitive) != 0)
+                continue;
+            // 插到列表末尾：新窗口没有使用记录，按最后使用时间降序它排最后
+            WindowInfo info{Util::getWindowTitle(hwnd), Util::getClassName(hwnd), hwnd};
+            lastInserted = groupList_->append(info);   // append() 内部已重算宽度（applyPreferredWidth）
+        }
+        if (lastInserted < 0) return;
+        // 开关 B + 手动优先：本次弹出期间用户翻过组列表就不抢选中（与 AppMode 分支同一语义）
+        if (cfg.getAutoSelectNew() && !userNavigated_)
+            groupList_->setCurrentRow(lastInserted);
+        // 行数变了，尺寸要重算：条目的宽度由 append() 自己管，而**窗口**的几何只在
+        // layoutForCurrentMode() 里算（它按当前 mode_ 给 groupList 的视图 setFixedSize 并重新居中），
+        // 整批调一次就够，不必每行调。这里不调 showLabelForItem()：GroupMode 下 label 是隐藏的
+        // （layoutForCurrentMode() 里 ui->label->hide()），它算的是 lw 的项坐标，与本列表无关
+        layoutForCurrentMode();
+        return;
+    }
 
     QList<QListWidgetItem*> newlyAdded;
     for (auto hwnd: added) {
@@ -607,7 +632,20 @@ bool Widget::removeEmptyGroups() {
     return countChanged;
 }
 
-void Widget::onWindowsGone(const QList<HWND>&) {
+void Widget::onWindowsGone(const QList<HWND>& removed) {
+    // 同上：本分支必须放在下面那道"必须是 AppMode"的守卫**之前**，否则 GroupMode 永远进不来
+    if (mode_ == Mode::GroupMode && this->isVisible()) {
+        bool changed = false;
+        for (auto hwnd: removed) {
+            const bool wasCurrent = (groupList_->currentHwnd() == hwnd);
+            const int row = groupList_->removeByHwnd(hwnd);
+            if (row < 0) continue;
+            changed = true;
+            if (wasCurrent) groupList_->setCurrentRow(row);   // 顺延到同下标（钳位在 setCurrentRow 内）
+        }
+        if (changed) layoutForCurrentMode();   // 行数变了才重算窗口几何，理由同 AppMode 分支
+        return;
+    }
     if (mode_ != Mode::AppMode || !this->isVisible()) return;
     // 项数没变就别重算几何：setGeometry 打在这扇半透明+模糊的窗口上是一次可见的重绘，
     // 而本函数每个 tick 都会被调
@@ -633,11 +671,31 @@ bool Widget::enterGroupMode(const QString& exePath, int initialRow) {
     if (windows.isEmpty()) return false;   // 没有窗口就不弹空列表
 
     mode_ = Mode::GroupMode;
+    currentGroupExePath_ = exePath;   // onNewWindows() 靠它只收本进程的新窗口
     userNavigated_ = false;
+    // 组列表同样要轮询新窗口，否则 GroupMode 的动态扫描永远不会被触发：
+    // requestShow() 里的启动只覆盖 AppMode，而入口 A 的弹窗是从隐藏状态 show 出来的，
+    // hideEvent 已经把 watcher 停掉，没有人会替我们启动它。
+    // 这里**不能**照抄 Task 9 的 `if (isVisible()) { stop(); start(); } else stop();`：
+    // 那里的可见性判据表示"窗口已经抢到屏幕"，而 enterGroupMode() 被调用时入口 A 的窗口还没 show
+    // （forceShow() 在调用方里、之后才跑），照抄会让入口 A 只 stop 不 start，
+    // 整个组列表期间一次都不轮询 —— 正是本 Step 要防的"静默不生效"。
+    // 所以判据取配置，启动一律是 stop() + start()：`WindowWatcher::start()` 的 seed() 是无条件
+    // 执行的（WindowWatcher.cpp:27），而入口 B（AppMode 可见时按 `）走到这里时 watcher 正跑着，
+    // 裸调 start() 是不安全的。重播 seed 在这里也是必须的：沿用上一条 Alt+Tab 播下的旧集合，
+    // 会把「那个时刻之后出现、而此刻**已经**在组列表里的本进程窗口」在下一 tick 又当成"新增"
+    // 报一次，列表里就出现两行同一个窗口（窗口集来自 orderedWindowsOf() → listValidWindows(exePath)，
+    // 即该进程此刻的全部现存窗口，与 winActiveOrder_ 有没有记录无关）。重播把这段最坏一个 tick 的
+    // 时间差压到微秒级；残余的缝隙在另一侧 —— 播种比上面那份列表快照晚一瞬，那一瞬里新建的窗口
+    // 会进 seed 却不在列表里，于是不会被报出来（漏一行，而不是重复）。顺序与 brief 一致
+    // （列表快照在前、播种在后），与 Task 9 在 AppMode 容忍的是同一类微秒级缝隙。
+    watcher_->stop();
+    if (cfg.getWatchNewWindows()) watcher_->start();
     groupList_->fill(windows);
     groupList_->setCurrentRow(initialRow);
     if (!layoutForCurrentMode()) {
         mode_ = Mode::AppMode;       // 取不到屏幕就退回，不留半吊子状态
+        currentGroupExePath_.clear();
         groupList_->clear();
         return false;
     }
