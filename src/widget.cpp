@@ -488,8 +488,10 @@ bool Widget::requestShowGroup() {
         if (!cur) return false;
         auto exePath = cur->data(Qt::UserRole).value<WindowGroup>().exePath;
         if (exePath.isEmpty()) return false;
-        // 初始高亮第 0 行 = 该组最后使用的窗口 = 不按 ` 直接松手会切到的那个。
-        // 保持这条不变式：按 ` 再松手 == 什么都不做的松手。
+        // 初始高亮第 0 行 = 该组最后使用的窗口（按活跃度降序的首行，见 orderedGroupWindows）。
+        // 不变式（**当该组最近使用的窗口此刻仍是有效窗口时**成立）：按 ` 再松手 == 什么都不做的松手。
+        // 该条件不成立时（MRU 窗口已被关闭/被过滤，或列表构建后窗口集有变），AppMode 的释放回退
+        // 会去读未排序的旧快照（见 widget.cpp:234 的既有 TODO），此时本入口反而更准。
         // 必须用返回值：丢掉它会让"陈旧 GroupMode"那一类 bug 复活（Task 7 的修复轮刚堵掉）
         if (!enterGroupMode(exePath, 0)) return false;
         return this->isVisible();
