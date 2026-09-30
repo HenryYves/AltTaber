@@ -68,6 +68,8 @@ add_executable(Win_Switcher src/main.cpp
         header/utils/SystemTray.h
         header/utils/ConfigManager.h
         header/utils/ConfigManagerBase.h
+        src/utils/WindowActivationOrder.cpp
+        header/utils/WindowActivationOrder.h
         src/utils/WindowWatcher.cpp
         header/utils/WindowWatcher.h
         src/UpdateDialog.cpp

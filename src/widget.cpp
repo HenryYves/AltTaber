@@ -16,6 +16,13 @@
 #include "utils/SystemTray.h"
 #include "utils/ConfigManager.h"
 
+/// 从 WindowGroup 里取出 hwnd 列表，顺序与 group.windows 一致
+static QList<HWND> hwndsOfGroup(const WindowGroup& group) {
+    QList<HWND> hwnds;
+    for (auto& info: group.windows) hwnds << info.hwnd;
+    return hwnds;
+}
+
 Widget::Widget(QWidget* parent) : QWidget(parent), ui(new Ui::Widget) {
     ui->setupUi(this);
     lw = ui->listWidget;
@@ -98,7 +105,7 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         auto foreWin = GetForegroundWindow();
         if (groupWindowOrder.isEmpty()) {
             auto targetExe = Util::getWindowProcessPath(foreWin);
-            groupWindowOrder = buildGroupWindowOrder(targetExe);
+            groupWindowOrder = winActiveOrder_.orderedWindowsOf(targetExe);
         }
         if (auto nextWin = rotateWindowInGroup(groupWindowOrder, foreWin, !(modifiers & Qt::ShiftModifier))) {
             Util::switchToWindow(nextWin, true);
@@ -185,7 +192,7 @@ void Widget::keyReleaseEvent(QKeyEvent* event) {
             if (auto item = lw->currentItem()) {
                 if (auto group = item->data(Qt::UserRole).value<WindowGroup>(); !group.windows.empty()) {
                     WindowInfo targetWin = group.windows.at(0); // TODO 需要排序（lastActiveWindow 被关闭情况下）
-                    const auto lastActive = getLastActiveGroupWindow(group.exePath).first;
+                    const auto lastActive = winActiveOrder_.lastActive(group.exePath).first;
                     for (auto& info: group.windows) {
                         if (info.hwnd == lastActive) {
                             targetWin = info;
@@ -222,7 +229,7 @@ void Widget::notifyForegroundChanged(HWND hwnd, ForegroundChangeSource source) {
     if (!Util::isWindowAcceptable(hwnd, source == WinEvent)) return;
     auto path = Util::getWindowProcessPath(hwnd); // TODO 比较耗时，最好仅在单次show期间缓存，同时避免hwnd复用造成缓存错误
     // TODO 不能让winActiveOrder无限增长，需要定时清理
-    winActiveOrder[path].insert(hwnd, QDateTime::currentDateTime());
+    winActiveOrder_.record(path, hwnd, QDateTime::currentDateTime());
 
     auto sourceStr = QMetaEnum::fromType<ForegroundChangeSource>().valueToKey(source);
     qDebug() << qUtf8Printable(QString("*ForeWin changed (%1):").arg(sourceStr)) // qUtf8Printable removes quotes ""
@@ -257,13 +264,14 @@ QList<WindowGroup> Widget::prepareWindowGroupList() {
         // 启用"新应用排第二"：无使用记录的窗口组放到第2位（紧跟当前前台窗口）
         QList<WindowGroup> withRecord, withoutRecord;
         for (auto& group : winGroupList) {
-            if (getLastValidActiveGroupWindow(group).second.isValid())
+            if (winActiveOrder_.lastValidActive(group.exePath, hwndsOfGroup(group)).second.isValid())
                 withRecord.append(group);
             else
                 withoutRecord.append(group);
         }
         std::sort(withRecord.begin(), withRecord.end(), [this](const WindowGroup& a, const WindowGroup& b) {
-            return getLastValidActiveGroupWindow(a).second > getLastValidActiveGroupWindow(b).second;
+            return winActiveOrder_.lastValidActive(a.exePath, hwndsOfGroup(a)).second >
+                   winActiveOrder_.lastValidActive(b.exePath, hwndsOfGroup(b)).second;
         });
         winGroupList = withRecord;
         if (!withoutRecord.isEmpty()) {
@@ -273,8 +281,8 @@ QList<WindowGroup> Widget::prepareWindowGroupList() {
         }
     } else {
         std::sort(winGroupList.begin(), winGroupList.end(), [this](const WindowGroup& a, const WindowGroup& b) {
-            auto timeA = getLastValidActiveGroupWindow(a).second;
-            auto timeB = getLastValidActiveGroupWindow(b).second;
+            auto timeA = winActiveOrder_.lastValidActive(a.exePath, hwndsOfGroup(a)).second;
+            auto timeB = winActiveOrder_.lastValidActive(b.exePath, hwndsOfGroup(b)).second;
             if (timeA.isNull() && timeB.isNull()) return false;
             if (timeA.isValid() && timeB.isValid()) return timeA > timeB;
             return timeA.isValid();
@@ -377,48 +385,6 @@ bool Widget::requestShow() { // TODO 当前台是开始菜单（Win）时，会�
     return prepareListWidget() && forceShow();
 }
 
-/// Warning: the `HWND` not guarantee to be valid (may be closed)
-auto Widget::getLastActiveGroupWindow(const QString& exePath) -> QPair<HWND, QDateTime> {
-    auto hwndOrder = winActiveOrder.value(exePath);
-    if (hwndOrder.isEmpty()) return {nullptr, QDateTime()};
-    // QHash & QMap deref to value(QDateTime) rather than QPair
-    auto iter = std::max_element(hwndOrder.begin(), hwndOrder.end());
-    return {iter.key(), iter.value()};
-}
-
-/// return null if no window recorded in group
-auto Widget::getLastValidActiveGroupWindow(const WindowGroup& group) -> QPair<HWND, QDateTime> {
-    auto hwndOrder = winActiveOrder.value(group.exePath);
-    if (hwndOrder.isEmpty()) return {nullptr, QDateTime()};
-
-    QList<HWND> windows;
-    for (auto& info: group.windows)
-        windows << info.hwnd;
-    sortGroupWindows(windows, group.exePath);
-
-    if (auto time = hwndOrder.value(windows.first()); !time.isNull())
-        return {windows.first(), time};
-    else // check if the first HWND is recorded
-        return {nullptr, QDateTime()};
-}
-
-/// sort Windows of [Group specified by exePath], by active order (latest first)
-void Widget::sortGroupWindows(QList<HWND>& windows, const QString& exePath) {
-    auto activeOrdMap = winActiveOrder.value(exePath);
-    if (activeOrdMap.isEmpty()) return;
-    // sort by active order
-    std::sort(windows.begin(), windows.end(), [&activeOrdMap](HWND a, HWND b) {
-        return activeOrdMap.value(a) > activeOrdMap.value(b); // default value if not found
-    }); // TODO update winActiveOrder! (remove invalid HWND)
-}
-
-/// group by exePath, sort by active order (last active first)
-QList<HWND> Widget::buildGroupWindowOrder(const QString& exePath) {
-    auto windows = Util::listValidWindows(exePath); // filter by path
-    sortGroupWindows(windows, exePath);
-    return windows;
-}
-
 bool Widget::eventFilter(QObject* watched, QEvent* event) {
     if (watched == lw && event->type() == QEvent::Wheel) {
         auto* wheelEvent = static_cast<QWheelEvent*>(event);
@@ -440,7 +406,7 @@ bool Widget::eventFilter(QObject* watched, QEvent* event) {
             static bool isLastRollUp = true;
             bool isRollUp = wheelEvent->angleDelta().x() > 0; // ListWidget的方向改成了从左到右，所以滚轮方向从y()变成x()了
             if (groupWindowOrder.isEmpty())
-                groupWindowOrder = buildGroupWindowOrder(targetExe); // TODO 其实这里不需要build 直接用lw里的就行...
+                groupWindowOrder = winActiveOrder_.orderedWindowsOf(targetExe); // TODO 其实这里不需要build 直接用lw里的就行...
 
             if (!hwnd) { // first time
                 hwnd = groupWindowOrder.first(); // 选择最后活跃的窗口 TODO 考虑当前窗口就是First的情况，需要跳过，类似WinGroup
@@ -488,7 +454,7 @@ void Widget::rotateTaskbarWindowInGroup(const QString& exePath, bool forward, in
         groupWindowOrder.clear();
     }
     if (groupWindowOrder.isEmpty()) {
-        groupWindowOrder = buildGroupWindowOrder(exePath);
+        groupWindowOrder = winActiveOrder_.orderedWindowsOf(exePath);
         lastHwnd = nullptr;
     }
 
@@ -501,7 +467,7 @@ void Widget::rotateTaskbarWindowInGroup(const QString& exePath, bool forward, in
         if (childPaths.isEmpty()) return;
         if (childPaths.size() == 1) {
             qDebug() << "Try to switch to child process:" << childPaths.first();
-            groupWindowOrder = buildGroupWindowOrder(childPaths.first());
+            groupWindowOrder = winActiveOrder_.orderedWindowsOf(childPaths.first());
         } else {
             // 如果有多个子进程路径，就根据validWindows过滤
             qWarning() << "!Multiple child processes:" << childPaths;
@@ -514,7 +480,7 @@ void Widget::rotateTaskbarWindowInGroup(const QString& exePath, bool forward, in
             for (auto& path: childPaths) {
                 if (validPaths.contains(path.toLower())) {
                     qDebug() << "Try to switch to valid child process:" << path;
-                    groupWindowOrder = buildGroupWindowOrder(path);
+                    groupWindowOrder = winActiveOrder_.orderedWindowsOf(path);
                     break;
                 }
             }

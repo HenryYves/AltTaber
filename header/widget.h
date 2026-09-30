@@ -5,6 +5,7 @@
 #include <Windows.h>
 #include <QListWidget>
 #include <QDebug>
+#include "utils/WindowActivationOrder.h"
 
 struct WindowGroup;
 
@@ -79,10 +80,6 @@ private:
     bool forceShow();
     void showLabelForItem(QListWidgetItem* item, QString text = QString());
     void setupLabelFont();
-    auto getLastActiveGroupWindow(const QString& exePath) -> QPair<HWND, QDateTime>;
-    auto getLastValidActiveGroupWindow(const WindowGroup& group) -> QPair<HWND, QDateTime>;
-    void sortGroupWindows(QList<HWND>& windows, const QString& exePath);
-    QList<HWND> buildGroupWindowOrder(const QString& exePath);
     static HWND rotateWindowInGroup(const QList<HWND>& windows, HWND current, bool forward = true);
     static HWND rotateNormalWindowInGroup(const QList<HWND>& windows, HWND current, bool forward = true);
 
@@ -90,8 +87,7 @@ private:
     Ui::Widget* ui;
     QListWidget* lw = nullptr;
     const QMargins ListWidgetMargin{24, 24, 24, 24};
-    /// exePath -> (HWND, time)
-    QHash<QString, QHash<HWND, QDateTime>> winActiveOrder;
+    WindowActivationOrder winActiveOrder_;
     QList<HWND> groupWindowOrder; // for Alt+` 同组窗口切换
 };
 
