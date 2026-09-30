@@ -1,7 +1,10 @@
 # AltTaber 新增：Alt+` 进程内窗口列表 + 切换期间动态扫描
 
 > 日期：2026-09-30
-> 状态：设计已定，待用户复核
+> 状态：**已实现并交付**（HEAD `a7cf0c9`）。验收结果：
+> Alt+`` ` `` 组列表（入口 A）与入口 B **经用户实测验收通过**；
+> **动态扫描未验收** —— 用户明确不需要该功能，代码保留、两个开关默认关闭。
+> 未决项与未验收范围见 `2026-09-30-group-window-list-and-dynamic-scan-known-issues.md`。
 > 仓库：`repo/`（fork `HenryYves/AltTaber`）
 > 新分支：从 `feat/configurable-blacklist` 的 HEAD `a665f50` 开（建议名 `feat/group-window-list-and-live-scan`）
 
