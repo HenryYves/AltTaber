@@ -479,7 +479,22 @@ bool Widget::enterGroupMode(const QString& exePath, int initialRow) {
 }
 
 /// 入口 A：Alt+` 独立按下（切换器不可见）——列表用「前台窗口所在进程」的窗口
+/// 入口 B：切换器已可见时按 ` —— 列表用「当前选中项」所在进程的窗口（见函数开头）
 bool Widget::requestShowGroup() {
+    // 入口 B：AppMode 可见时按 ` —— 用「当前选中项」所在进程，而不是前台窗口
+    // （此时前台窗口是本 Widget 自己，取它没有意义）
+    if (mode_ == Mode::AppMode && this->isVisible()) {
+        auto* cur = lw->currentItem();
+        if (!cur) return false;
+        auto exePath = cur->data(Qt::UserRole).value<WindowGroup>().exePath;
+        if (exePath.isEmpty()) return false;
+        // 初始高亮第 0 行 = 该组最后使用的窗口 = 不按 ` 直接松手会切到的那个。
+        // 保持这条不变式：按 ` 再松手 == 什么都不做的松手。
+        // 必须用返回值：丢掉它会让"陈旧 GroupMode"那一类 bug 复活（Task 7 的修复轮刚堵掉）
+        if (!enterGroupMode(exePath, 0)) return false;
+        return this->isVisible();
+    }
+
     auto foreWin = GetForegroundWindow();
     auto exePath = Util::getWindowProcessPath(foreWin);
     if (exePath.isEmpty()) return false;
