@@ -50,20 +50,34 @@ public:
 
     /// User-configured blacklist of exe filenames to hide from the switcher.
     /// In config.ini: [blacklist] \n file_names=app1.exe, app2.exe
+    /// 结果被缓存：isWindowAcceptable() 每个窗口都会调它（Util.cpp:290），
+    /// 动态扫描开启后这个调用会变得很频繁。configEdited 时失效。
     QStringList getBlacklistFileNames() {
-        auto raw = get("blacklist/file_names", QStringList{}).toStringList();
-        QStringList result;
-        for (auto& item : raw) {
-            for (auto& sub : item.split(',')) {
-                auto trimmed = sub.trimmed();
-                if (!trimmed.isEmpty()) result << trimmed.toLower();
+        if (!blacklistCacheValid_) {
+            auto raw = get("blacklist/file_names", QStringList{}).toStringList();
+            QStringList result;
+            for (auto& item: raw) {
+                for (auto& sub: item.split(',')) {
+                    auto trimmed = sub.trimmed();
+                    if (!trimmed.isEmpty()) result << trimmed.toLower();
+                }
             }
+            blacklistCache_ = result;
+            blacklistCacheValid_ = true;
         }
-        return result;
+        return blacklistCache_;
     }
 
 private:
-    explicit ConfigManager(const QString& filename) : ConfigManagerBase(filename) {}
+    mutable QStringList blacklistCache_;
+    mutable bool blacklistCacheValid_ = false;
+
+    explicit ConfigManager(const QString& filename) : ConfigManagerBase(filename) {
+        // 配置文件经托盘 Settings 编辑保存后失效缓存
+        connect(this, &ConfigManagerBase::configEdited, this, [this] {
+            blacklistCacheValid_ = false;
+        });
+    }
 };
 
 
