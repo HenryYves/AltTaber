@@ -211,11 +211,18 @@ void Widget::setupLabelFont() {
 void Widget::keyReleaseEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Alt) {
         if (mode_ == Mode::GroupMode) {
-            commitGroupSelection();
+            // 与 AppMode 的松手分支对称（那边也是 `if (this->isVisible())` 才提交）：只有列表确实在屏幕上时才提交。
+            // 隐藏状态下提交等于"切到用户从没看见过的那一行"——例如中途点了别处触发 hide()，
+            // 或上一次进入失败、mode_ 还留着 GroupMode 时又按了一次 Alt+`
+            if (this->isVisible()) {
+                commitGroupSelection();
+                hide(); //! 与 AppMode 同理：必须在切换之后 hide，否则焦点会回落到上一个前台窗口
+            }
+            // 下面三行**故意放在门外**：无论有没有提交，Alt 抬起都必须把模式/列表收干净，
+            // 不留一个隐藏着的 GroupMode 状态给下一次按键
             groupWindowOrder.clear();      // 与 AppMode 一致，Alt 抬起即清
             mode_ = Mode::AppMode;
             groupList_->clear();
-            hide();
             QWidget::keyReleaseEvent(event);
             return;
         }
