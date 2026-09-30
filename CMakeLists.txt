@@ -103,3 +103,12 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 if (MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE "/utf-8")
 endif ()
+
+# ---- 单元测试：纯 C++，不依赖 Qt ----
+add_executable(WindowDiffTests tests/window_diff_tracker_test.cpp)
+set_target_properties(WindowDiffTests PROPERTIES
+        AUTOMOC OFF AUTOUIC OFF AUTORCC OFF
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/$<CONFIG>")
+if (MSVC)
+    target_compile_options(WindowDiffTests PRIVATE "/utf-8")
+endif ()
