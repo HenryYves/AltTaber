@@ -86,7 +86,7 @@ new_app_second=true
 
 ### `[dynamic]` — Live update while the switcher is open
 
-Both default to `false`. Option B has no effect while option A is off.
+Both default to `false`. `auto_select_new` has no effect while `watch_new_windows` is off.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|

@@ -85,7 +85,7 @@ new_app_second=true
 
 ### `[dynamic]` — 切换器显示期间的实时更新
 
-两项都默认 `false`。开关 B 在开关 A 关闭时无效果。
+两项都默认 `false`。`auto_select_new` 在 `watch_new_windows` 关闭时无效果。
 
 | 键 | 类型 | 默认 | 说明 |
 |-----|------|---------|-------------|
