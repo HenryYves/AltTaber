@@ -74,6 +74,9 @@ Widget::Widget(QWidget* parent) : QWidget(parent), ui(new Ui::Widget) {
             }
         }
     });
+
+    groupList_ = new GroupWindowList(this);
+    groupList_->widget()->installEventFilter(this);   // 滚轮移动高亮（见 Step 2b）
 }
 
 Widget::~Widget() {
@@ -95,22 +98,17 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         // weird formula, but works (hhh)
         auto index = (i - (2 * isShiftPressed - 1) + lw->count()) % lw->count();
         lw->setCurrentRow(index);
-    } else if (key == Qt::Key_QuoteLeft && (modifiers & Qt::AltModifier)) { // Alt + `, 在前台窗口同组窗口内切换
-        if (this->isVisible() && !this->isMinimized()) {
-            // isVisible() == true if minimized
-            // 不使用`isForeground()`，即使`bringWindowToTop`(without active)，少数窗口也可能抢夺焦点，如`CAJViewer`
-            hide();
-            return;
+    } else if (key == Qt::Key_QuoteLeft && (modifiers & Qt::AltModifier)) {
+        const int delta = (modifiers & Qt::ShiftModifier) ? -1 : 1;
+        if (mode_ == Mode::GroupMode && this->isVisible()) {
+            // 情形 C：已在组列表内 —— 移动高亮
+            groupList_->moveSelection(delta);
+            userNavigated_ = true;
+        } else {
+            // 情形 A（不可见）/ 情形 B（AppMode 可见，由 Task 8 接管）
+            requestShowGroup();
         }
-        auto foreWin = GetForegroundWindow();
-        if (groupWindowOrder.isEmpty()) {
-            auto targetExe = Util::getWindowProcessPath(foreWin);
-            groupWindowOrder = winActiveOrder_.orderedWindowsOf(targetExe);
-        }
-        if (auto nextWin = rotateWindowInGroup(groupWindowOrder, foreWin, !(modifiers & Qt::ShiftModifier))) {
-            Util::switchToWindow(nextWin, true);
-            qInfo() << "(Alt+`)Switch to" << Util::getWindowTitle(nextWin) << Util::getClassName(nextWin);
-        }
+        return;
     } else if (key == Qt::Key_Up || key == Qt::Key_Down) {
         if (auto item = lw->currentItem()) {
             auto center = lw->visualItemRect(item).center();
@@ -186,6 +184,15 @@ void Widget::setupLabelFont() {
 
 void Widget::keyReleaseEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Alt) {
+        if (mode_ == Mode::GroupMode) {
+            commitGroupSelection();
+            groupWindowOrder.clear();      // 与 AppMode 一致，Alt 抬起即清
+            mode_ = Mode::AppMode;
+            groupList_->clear();
+            hide();
+            QWidget::keyReleaseEvent(event);
+            return;
+        }
         groupWindowOrder.clear(); // for Alt + `
         if (this->isVisible()) {
             // active selected window
@@ -308,49 +315,9 @@ bool Widget::prepareListWidget() {
         auto width = lw->gridSize().width() * lw->count() + (firstRect.x() - lw->frameWidth()); // 一些微小的噼里啪啦修正
         lw->setFixedWidth(width);
 
-        // get screen
-        bool displayOnPrimary = (cfg.getDisplayMonitor() == PrimaryMonitor);
-        auto screen = displayOnPrimary ?
-                      QGuiApplication::primaryScreen() :
-                      QGuiApplication::screenAt(QCursor::pos()); // multi-screen support
-        if (!screen && !displayOnPrimary) { // fallback to primary screen
-            qWarning() << "Cursor Screen nullptr! Fallback to primary";
-            screen = QApplication::primaryScreen();
-        }
-        if (!screen) {
-            qWarning() << "Screen nullptr!";
-            sysTray.showMessage("Error", "Screen nullptr!");
+        // 几何：本程序唯一的居中逻辑在 layoutForCurrentMode()（Step 4b）
+        if (!layoutForCurrentMode())
             return false;
-        }
-
-        // move to scrren center
-        qDebug() << "Screen:" << screen->name();
-        auto lwRect = lw->rect();
-        auto thisRect = lwRect.marginsAdded(ListWidgetMargin);
-        thisRect.moveCenter(screen->geometry().center());
-
-        //region Fixed in Qt6, see commit [b927ee4b]
-        //      !!!WARNING: 对于多屏幕，直接使用setGeometry or move会报错(QWindowsWindow::setGeometry: Unable to set geometry) & size显示不正确！
-        //      报错时机为：从一个屏幕hide，再在另一个屏幕show; 第二次在同一个屏幕show，则正常
-        //      size显示不正确不能忍，遂改用WinAPI
-        //endregion
-        this->setGeometry(thisRect);
-
-        //region Fixed in Qt6, see commit [b927ee4b]
-        //this->windowHandle()->setScreen(screen); // 若首次显示是在副屏，会导致size显示错误（如果没有这行）
-        // `toNativePixels`是针对Point的，会根据屏幕原点进行位移
-        // 对于其他类型（如Size），直接乘以`QHighDpiScaling::factor(screen)`即可
-        //auto physicalPos = QHighDpi::toNativePixels(thisRect.topLeft(), screen);
-        // 如果用SetWindowPos的话要注意加上`SWP_NOACTIVATE`，否则焦点有问题，没错，NoActive反而是Active (focus)的
-        //SetWindowPos(hWnd(), nullptr, physicalPos.x(), physicalPos.y(), 0, 0, SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER);
-        // !!!NOTE: 用WinAPI控制size貌似有问题，在图标增减的时候，无法正确调整Width，离子谱；只能用resize
-        // 1. × 猜想是showNormal()恢复了原有的size，导致resize无效；但是改成show()也不行
-        // 2. 猜想是隐藏状态改变size无效？（不科学吧），但是在`SetWindowPos`前show()好像会好一点（第二次显示调整size成功）aaa
-        //this->resize(thisRect.size());
-        //endregion
-
-        lwRect.moveCenter(this->rect().center()); // local pos
-        lw->move(lwRect.topLeft());
     } else {
         // no item, hide ? TODO
         return false;
@@ -381,11 +348,144 @@ bool Widget::prepareListWidget() {
     return true;
 }
 
+/// 按 DisplayMonitor 配置挑选目标屏幕；配置为跟随鼠标但取不到光标下屏幕时回退主屏
+QScreen* Widget::targetScreen() {
+    const bool displayOnPrimary = (cfg.getDisplayMonitor() == PrimaryMonitor);
+    auto* screen = displayOnPrimary ? QGuiApplication::primaryScreen()
+                                    : QGuiApplication::screenAt(QCursor::pos());
+    if (!screen && !displayOnPrimary) { // fallback to primary screen
+        qWarning() << "Cursor Screen nullptr! Fallback to primary";
+        screen = QGuiApplication::primaryScreen();
+    }
+    return screen;
+}
+
+/// 本程序唯一的窗口几何计算处：按当前 mode_ 决定内容尺寸，再把窗口居中到目标屏幕
+bool Widget::layoutForCurrentMode() {
+    QWidget* content = nullptr;
+    if (mode_ == Mode::AppMode) {
+        groupList_->widget()->hide();
+        lw->show();
+        ui->label->show();
+        content = lw;   // 宽度已由 prepareListWidget() 里的 setFixedWidth 设好
+    } else {
+        lw->hide();
+        ui->label->hide();
+        auto* view = groupList_->widget();
+        view->setFixedSize(groupList_->preferredSize());
+        view->show();
+        content = view;
+    }
+
+    auto* screen = targetScreen();
+    if (!screen) {
+        qWarning() << "Screen nullptr!";
+        sysTray.showMessage("Error", "Screen nullptr!");
+        return false;
+    }
+
+    //region Fixed in Qt6, see commit [b927ee4b]
+    //      !!!WARNING: 对于多屏幕，直接使用setGeometry or move会报错(QWindowsWindow::setGeometry: Unable to set geometry) & size显示不正确！
+    //      报错时机为：从一个屏幕hide，再在另一个屏幕show; 第二次在同一个屏幕show，则正常
+    //      size显示不正确不能忍，遂改用WinAPI
+    //endregion
+    qDebug() << "Screen:" << screen->name();
+    auto contentRect = QRect(QPoint(0, 0), content->size());
+    auto thisRect = contentRect.marginsAdded(ListWidgetMargin);
+    thisRect.moveCenter(screen->geometry().center());
+    this->setGeometry(thisRect);
+
+    //region Fixed in Qt6, see commit [b927ee4b]
+    //this->windowHandle()->setScreen(screen); // 若首次显示是在副屏，会导致size显示错误（如果没有这行）
+    // `toNativePixels`是针对Point的，会根据屏幕原点进行位移
+    // 对于其他类型（如Size），直接乘以`QHighDpiScaling::factor(screen)`即可
+    //auto physicalPos = QHighDpi::toNativePixels(thisRect.topLeft(), screen);
+    // 如果用SetWindowPos的话要注意加上`SWP_NOACTIVATE`，否则焦点有问题，没错，NoActive反而是Active (focus)的
+    //SetWindowPos(hWnd(), nullptr, physicalPos.x(), physicalPos.y(), 0, 0, SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER);
+    // !!!NOTE: 用WinAPI控制size貌似有问题，在图标增减的时候，无法正确调整Width，离子谱；只能用resize
+    // 1. × 猜想是showNormal()恢复了原有的size，导致resize无效；但是改成show()也不行
+    // 2. 猜想是隐藏状态改变size无效？（不科学吧），但是在`SetWindowPos`前show()好像会好一点（第二次显示调整size成功）aaa
+    //this->resize(thisRect.size());
+    //endregion
+
+    contentRect.moveCenter(this->rect().center()); // local pos
+    content->move(contentRect.topLeft());
+    return true;
+}
+
 bool Widget::requestShow() { // TODO 当前台是开始菜单（Win）时，会导致显示 但无法操控
+    mode_ = Mode::AppMode;
+    userNavigated_ = false;
     return prepareListWidget() && forceShow();
 }
 
+/// 该进程的窗口，按最后使用时间降序（复用 Task 5 抽出的排序）
+QList<WindowInfo> Widget::orderedGroupWindows(const QString& exePath) {
+    QList<WindowInfo> result;
+    for (auto hwnd: winActiveOrder_.orderedWindowsOf(exePath))
+        result.append({Util::getWindowTitle(hwnd), Util::getClassName(hwnd), hwnd});
+    return result;
+}
+
+/// 进入 GroupMode：用给定进程的窗口填充竖排列表，并定好初始高亮
+void Widget::enterGroupMode(const QString& exePath, int initialRow) {
+    if (exePath.isEmpty()) return;
+    auto windows = orderedGroupWindows(exePath);
+    if (windows.isEmpty()) return;   // 没有窗口就不弹空列表
+
+    mode_ = Mode::GroupMode;
+    userNavigated_ = false;
+    groupList_->fill(windows);
+    groupList_->setCurrentRow(initialRow);
+    if (!layoutForCurrentMode()) {
+        mode_ = Mode::AppMode;       // 取不到屏幕就退回，不留半吊子状态
+        groupList_->clear();
+    }
+}
+
+/// 入口 A：Alt+` 独立按下（切换器不可见）——列表用「前台窗口所在进程」的窗口
+bool Widget::requestShowGroup() {
+    auto foreWin = GetForegroundWindow();
+    auto exePath = Util::getWindowProcessPath(foreWin);
+    if (exePath.isEmpty()) return false;
+
+    auto order = winActiveOrder_.orderedWindowsOf(exePath);
+    if (order.isEmpty()) return false;
+
+    // 初始高亮 = 旧盲切的目标：前台窗口下标 +1（Shift 则 -1），端点循环。
+    // 用下标算，不假设"前台窗口一定排首行"——那样高亮会偏。
+    const int n = order.size();
+    int idx = order.indexOf(foreWin);
+    if (idx < 0) idx = 0;                       // 前台窗口不在过滤后的列表里，退化为首行
+    const bool backward = Util::isKeyPressed(VK_SHIFT);
+    const int delta = backward ? -1 : 1;
+    const int initialRow = ((idx + delta) % n + n) % n;
+
+    enterGroupMode(exePath, initialRow);
+    // 几何算完还得真正把窗口显示出来：情形 A 的切换器原本是隐藏的，
+    // 沿用 AppMode 那套防闪烁的 forceShow()（见设计文档 §2.4）。
+    // enterGroupMode 失败时会退回 AppMode，那种情况下不能显示。
+    if (mode_ == Mode::GroupMode && !this->isVisible())
+        forceShow();
+    return this->isVisible();
+}
+
+/// Alt 抬起时，GroupMode 的提交动作
+void Widget::commitGroupSelection() {
+    if (auto hwnd = groupList_->currentHwnd()) {
+        Util::switchToWindow(hwnd);
+        qInfo() << "(Alt+`)Switch to" << Util::getWindowTitle(hwnd) << Util::getClassName(hwnd);
+    }
+}
+
 bool Widget::eventFilter(QObject* watched, QEvent* event) {
+    if (mode_ == Mode::GroupMode && watched == groupList_->widget() && event->type() == QEvent::Wheel) {
+        auto* wheelEvent = static_cast<QWheelEvent*>(event);
+        // 向上滚 = 上移
+        groupList_->moveSelection(wheelEvent->angleDelta().y() > 0 ? -1 : +1);
+        userNavigated_ = true;
+        return true;
+    }
     if (watched == lw && event->type() == QEvent::Wheel) {
         auto* wheelEvent = static_cast<QWheelEvent*>(event);
         auto cursorPos = wheelEvent->position().toPoint();
