@@ -6,22 +6,10 @@
 #include <QListWidget>
 #include <QDebug>
 #include "utils/WindowActivationOrder.h"
+#include "utils/WindowInfo.h"
 
 struct WindowGroup;
 
-struct WindowInfo {
-    QString title;
-    QString className;
-    HWND hwnd = nullptr;
-};
-
-// C++17 inline: 防止重定义
-inline QDebug operator<<(QDebug dbg, const WindowInfo& info) {
-    dbg.nospace() << "WindowInfo(" << info.title << ", " << info.className << ", " << info.hwnd << ")";
-    return dbg.space();
-}
-
-Q_DECLARE_METATYPE(WindowInfo) // for QVariant
 struct WindowGroup {
     WindowGroup() = default;
 
