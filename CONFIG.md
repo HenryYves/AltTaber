@@ -17,6 +17,10 @@ file_names=obsidian.exe, slack.exe
 
 [sorting]
 new_app_second=true
+
+[dynamic]
+watch_new_windows=true
+auto_select_new=true
 ```
 
 ---
@@ -77,6 +81,17 @@ If an app still shows up, check its exact exe name via Task Manager.
 [sorting]
 new_app_second=true
 ```
+
+---
+
+### `[dynamic]` — Live update while the switcher is open
+
+Both default to `false`. Option B has no effect while option A is off.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `watch_new_windows` | bool | `false` | While the switcher is open, poll for newly appeared background windows at 300 ms and insert them into the list. Closed windows are removed symmetrically. |
+| `auto_select_new` | bool | `false` | When a new window is inserted, move the selection onto it. Yields to manual navigation: once you press Tab / `` ` `` / an arrow / the wheel during the current popup, the selection stops being taken over until the next popup. |
 
 ---
 

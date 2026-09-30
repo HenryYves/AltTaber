@@ -68,6 +68,18 @@ public:
         return blacklistCache_;
     }
 
+    /// 切换器显示期间轮询新窗口并动态入列。
+    /// In config.ini: [dynamic] \n watch_new_windows=true
+    bool getWatchNewWindows() {
+        return get("dynamic/watch_new_windows", false).toBool();
+    }
+
+    /// 新窗口入列时自动把选中项跳过去。开关 A 关闭时此项无效果。
+    /// In config.ini: [dynamic] \n auto_select_new=true
+    bool getAutoSelectNew() {
+        return get("dynamic/auto_select_new", false).toBool();
+    }
+
 private:
     mutable QStringList blacklistCache_;
     mutable bool blacklistCacheValid_ = false;

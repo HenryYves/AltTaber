@@ -17,6 +17,10 @@ file_names=obsidian.exe, slack.exe
 
 [sorting]
 new_app_second=true
+
+[dynamic]
+watch_new_windows=true
+auto_select_new=true
 ```
 
 ---
@@ -76,6 +80,17 @@ file_names=obsidian.exe, slack.exe, telegram.exe
 [sorting]
 new_app_second=true
 ```
+
+---
+
+### `[dynamic]` — 切换器显示期间的实时更新
+
+两项都默认 `false`。开关 B 在开关 A 关闭时无效果。
+
+| 键 | 类型 | 默认 | 说明 |
+|-----|------|---------|-------------|
+| `watch_new_windows` | bool | `false` | 切换器显示期间以 300ms 轮询新出现的后台窗口并插入列表；窗口关闭时对称移除。 |
+| `auto_select_new` | bool | `false` | 新窗口入列时把选中项移到它上面。会让位于手动操作：本次弹出期间一旦按过 Tab / `` ` `` / 方向键 / 滚轮，就不再抢选中，直到下次弹出。 |
 
 ---
 
