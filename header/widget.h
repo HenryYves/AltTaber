@@ -93,14 +93,18 @@ private:
     /// 该进程的窗口，按最后使用时间降序
     QList<WindowInfo> orderedGroupWindows(const QString& exePath);
 
+    /// `lw` 的宽度公式（项数 × 栅格宽 + 修正）。只此一处：
+    /// 列表是 IconMode + 不换行 + 无滚动条，宽度必须正好等于内容宽，
+    /// 所以 prepareListWidget() 与动态入列/移除三条路径都要调它
+    void updateListWidth();
     /// 轮询发现的新窗口：AppMode 下并入同进程的组，或为新进程插入一项
     void onNewWindows(const QList<HWND>& added);
     /// 轮询发现的已消失窗口：移除窗口已全部关闭的组
     void onWindowsGone(const QList<HWND>& removed);
     /// AppMode：为新进程插入一个列表项（沿用既有排序语义：无使用记录 → 末尾）
     int insertAppItem(const QString& exePath, HWND hwnd);
-    /// 移除窗口已全部关闭的组
-    void removeEmptyGroups();
+    /// 移除窗口已全部关闭的组。返回是否真的删掉了项（项数没变就别动几何）
+    bool removeEmptyGroups();
 
 private:
     Ui::Widget* ui;
@@ -111,6 +115,10 @@ private:
     Mode mode_ = Mode::AppMode;
     GroupWindowList* groupList_ = nullptr;   // 在构造函数里 new，parent 为 this
     WindowWatcher* watcher_ = nullptr;       // 同上；只在列表可见时运行
+    /// 本次弹出钉住的屏幕（见 targetScreen()）：动态入列会重跑几何，
+    /// 若每次都按光标重新选屏，跟随鼠标模式下弹窗会在中途跳到另一个显示器。
+    /// 每次弹出开始时清空、hideEvent 再清一次
+    QScreen* pinnedScreen_ = nullptr;
     bool userNavigated_ = false;             // 本次弹出期间用户是否手动翻过列表
 };
 

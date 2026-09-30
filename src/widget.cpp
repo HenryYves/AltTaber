@@ -341,6 +341,18 @@ QList<WindowGroup> Widget::prepareWindowGroupList() {
     return winGroupList;
 }
 
+/// `lw` 的宽度公式（原本内联在 prepareListWidget() 里，Task 9 复审抽出）：
+/// 列表是 IconMode + LeftToRight + setWrapping(false) + 滚动条 AlwaysOff，
+/// 宽度必须正好是"项数 × 栅格宽 + 修正"，否则多出来的项落在可视区外、少了的项留下空白。
+/// 三项变化：prepareListWidget()（全量重建）、onNewWindows()（插入）、onWindowsGone()（移除）
+void Widget::updateListWidth() {
+    if (auto firstItem = lw->item(0)) {
+        auto firstRect = lw->visualItemRect(firstItem);
+        auto width = lw->gridSize().width() * lw->count() + (firstRect.x() - lw->frameWidth()); // 一些微小的噼里啪啦修正
+        lw->setFixedWidth(width);
+    }
+}
+
 bool Widget::prepareListWidget() {
     auto winGroupList = prepareWindowGroupList();
     lw->clear();
@@ -353,18 +365,15 @@ bool Widget::prepareListWidget() {
     }
 
     // calculate Geometry
-    if (auto firstItem = lw->item(0)) {
-        auto firstRect = lw->visualItemRect(firstItem);
-        auto width = lw->gridSize().width() * lw->count() + (firstRect.x() - lw->frameWidth()); // 一些微小的噼里啪啦修正
-        lw->setFixedWidth(width);
-
-        // 几何：本程序唯一的居中逻辑在 layoutForCurrentMode()（Step 4b）
-        if (!layoutForCurrentMode())
-            return false;
-    } else {
+    if (!lw->item(0)) {
         // no item, hide ? TODO
         return false;
     }
+    updateListWidth();
+
+    // 几何：本程序唯一的居中逻辑在 layoutForCurrentMode()（Step 4b）
+    if (!layoutForCurrentMode())
+        return false;
 
     // set current item
     if (lw->count() >= 2) {
@@ -391,8 +400,13 @@ bool Widget::prepareListWidget() {
     return true;
 }
 
-/// 按 DisplayMonitor 配置挑选目标屏幕；配置为跟随鼠标但取不到光标下屏幕时回退主屏
+/// 按 DisplayMonitor 配置挑选目标屏幕；配置为跟随鼠标但取不到光标下屏幕时回退主屏。
+/// 本次弹出已经选过屏就直接复用（pinnedScreen_）：动态入列会在弹出期间反复重算几何，
+/// 而跟随鼠标模式下 `screenAt(QCursor::pos())` 一次一个答案 —— 用户中途把鼠标移到另一个
+/// 显示器上，弹窗就会跟着跳过去，这是本次改动之前不存在的行为
 QScreen* Widget::targetScreen() {
+    if (pinnedScreen_) return pinnedScreen_;
+
     const bool displayOnPrimary = (cfg.getDisplayMonitor() == PrimaryMonitor);
     auto* screen = displayOnPrimary ? QGuiApplication::primaryScreen()
                                     : QGuiApplication::screenAt(QCursor::pos());
@@ -400,6 +414,8 @@ QScreen* Widget::targetScreen() {
         qWarning() << "Cursor Screen nullptr! Fallback to primary";
         screen = QGuiApplication::primaryScreen();
     }
+    // 取不到就不钉，下次调用再试
+    if (screen) pinnedScreen_ = screen;
     return screen;
 }
 
@@ -410,7 +426,7 @@ bool Widget::layoutForCurrentMode() {
         groupList_->widget()->hide();
         lw->show();
         ui->label->show();
-        content = lw;   // 宽度已由 prepareListWidget() 里的 setFixedWidth 设好
+        content = lw;   // 宽度由 updateListWidth() 设好（prepareListWidget / onNewWindows / onWindowsGone）
     } else {
         lw->hide();
         ui->label->hide();
@@ -459,13 +475,18 @@ bool Widget::layoutForCurrentMode() {
 bool Widget::requestShow() { // TODO 当前台是开始菜单（Win）时，会导致显示 但无法操控
     mode_ = Mode::AppMode;
     userNavigated_ = false;
+    pinnedScreen_ = nullptr;   // 新的一次弹出：重新按配置选屏（见 targetScreen()）
     const bool shown = prepareListWidget() && forceShow();
-    if (shown) {
+
+    // 判据是"列表此刻在不在屏幕上"，不是 forceShow() 的返回值 —— 后者只表示"抢到前台"。
+    // main.cpp:77-88 的 retry 循环最多试 5 次，可能**窗口已可见**却没抢到前台就放弃；
+    // 用 shown 当判据会让那条路径上的 watcher 根本没启动（A 开着也不轮询）。
+    if (this->isVisible()) {
         if (cfg.getWatchNewWindows()) {
             // 先 stop() 再 start()：`WindowWatcher::start()` 里的 seed() 是无条件执行的，
             // 对**正在运行**的 watcher 裸调 start() 会把"上一 tick 之后新建的窗口"吃进 seed，
             // 那些窗口再也不会被报出来（静默丢通知）。requestShow() 确实可能被重复调用
-            // （main.cpp:88 的 retry 循环、或焦点被抢走后重按 Alt+Tab），所以不能假设此处是停止态。
+            // （main.cpp:77-88 的 retry 循环、或焦点被抢走后重按 Alt+Tab），所以不能假设此处是停止态。
             // 此刻 prepareListWidget() 刚把列表整体重建过，重新播种与列表内容一致，不会漏报。
             watcher_->stop();
             watcher_->start();
@@ -481,6 +502,7 @@ bool Widget::requestShow() { // TODO 当前台是开始菜单（Win）时，会�
 /// 后台不停枚举窗口的定时器
 void Widget::hideEvent(QHideEvent* event) {
     watcher_->stop();
+    pinnedScreen_ = nullptr;   // 本次弹出结束，屏幕钉扎作废
     QWidget::hideEvent(event);
 }
 
@@ -504,8 +526,21 @@ void Widget::onNewWindows(const QList<HWND>& added) {
         if (existing) {
             // 已有进程多了一个窗口：不新增项，只把窗口并进该组的窗口列表
             auto group = existing->data(Qt::UserRole).value<WindowGroup>();
-            group.addWindow({Util::getWindowTitle(hwnd), Util::getClassName(hwnd), hwnd});
-            existing->setData(Qt::UserRole, QVariant::fromValue(group));
+            // 兜底去重：只信 diff 是不够的 —— 列表有可能在 tracker 还没来得及播种时就被整体重建
+            // （requestShow() 里 prepareListWidget() 先跑、播种紧随其后），这时同一个 hwnd 会在
+            // 下一 tick 被当成"新增"报上来，而它其实已经在组里了。重复项不会切错窗口
+            // （松手时按 lastActive 命中），但会让组的窗口列表失真，顺手挡掉
+            bool alreadyInGroup = false;
+            for (auto& info: group.windows) {
+                if (info.hwnd == hwnd) {
+                    alreadyInGroup = true;
+                    break;
+                }
+            }
+            if (!alreadyInGroup) {
+                group.addWindow({Util::getWindowTitle(hwnd), Util::getClassName(hwnd), hwnd});
+                existing->setData(Qt::UserRole, QVariant::fromValue(group));
+            }
         } else {
             int row = insertAppItem(path, hwnd);
             if (row >= 0) newlyAdded.append(lw->item(row));
@@ -513,9 +548,20 @@ void Widget::onNewWindows(const QList<HWND>& added) {
     }
 
     if (newlyAdded.isEmpty()) return;
+
+    // 项数变了 ⇒ 列表宽度（以及窗口几何）必须跟着变：lw 不换行、无滚动条，
+    // 追加在末尾的新项会落在可视区之外，而开关 B 关时没有任何代码会去滚动它
+    updateListWidth();
+    layoutForCurrentMode();
+
     // 开关 B + 手动优先：本次弹出期间用户翻过列表就不再抢
     if (cfg.getAutoSelectNew() && !userNavigated_)
         lw->setCurrentItem(newlyAdded.last());
+
+    // 几何动过之后必须重新摆标签：showLabelForItem() 算的是窗口坐标，
+    // 而 layoutForCurrentMode() 只挪 content（"标签在最后一次几何变化之后定位"这条不变式
+    // 原本只靠调用顺序维持，弹出中途重新布局会打破它）
+    showLabelForItem(lw->currentItem());
 }
 
 /// 沿用既有排序语义：无使用记录的新进程排到末尾；new_app_second 开启时插到第 2 位
@@ -535,7 +581,8 @@ int Widget::insertAppItem(const QString& exePath, HWND hwnd) {
     return row;
 }
 
-void Widget::removeEmptyGroups() {
+bool Widget::removeEmptyGroups() {
+    bool countChanged = false;
     for (int i = lw->count() - 1; i >= 0; --i) {
         auto group = lw->item(i)->data(Qt::UserRole).value<WindowGroup>();
         for (int j = group.windows.size() - 1; j >= 0; --j)
@@ -544,16 +591,24 @@ void Widget::removeEmptyGroups() {
         if (group.windows.isEmpty()) {
             const bool wasCurrent = (lw->currentRow() == i);
             delete lw->takeItem(i);
+            countChanged = true;
             if (wasCurrent) lw->setCurrentRow(qBound(0, i, qMax(0, lw->count() - 1)));
         } else {
             lw->item(i)->setData(Qt::UserRole, QVariant::fromValue(group));
         }
     }
+    return countChanged;
 }
 
 void Widget::onWindowsGone(const QList<HWND>&) {
     if (mode_ != Mode::AppMode || !this->isVisible()) return;
-    removeEmptyGroups();
+    // 项数没变就别重算几何：setGeometry 打在这扇半透明+模糊的窗口上是一次可见的重绘，
+    // 而本函数每个 tick 都会被调
+    if (!removeEmptyGroups()) return;
+
+    updateListWidth();
+    layoutForCurrentMode();
+    showLabelForItem(lw->currentItem());   // 同上：几何动过，标签要重摆
 }
 
 /// 该进程的窗口，按最后使用时间降序（复用 Task 5 抽出的排序）
@@ -601,6 +656,7 @@ bool Widget::requestShowGroup() {
         return this->isVisible();
     }
 
+    pinnedScreen_ = nullptr;   // 入口 A：新的一次弹出，重新按配置选屏（同上）
     auto foreWin = GetForegroundWindow();
     auto exePath = Util::getWindowProcessPath(foreWin);
     if (exePath.isEmpty()) return false;
@@ -638,6 +694,14 @@ void Widget::commitGroupSelection() {
 }
 
 bool Widget::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == lw && event->type() == QEvent::MouseButtonPress) {
+        // 鼠标点选同样是"用户手动移动选中"。item 是可选中的（`:363` 那行
+        // `~Qt::ItemIsSelectable` 被注释掉了），点一下就会改 currentItem，
+        // 而这条路径不经过 keyPressEvent 的任何分支 —— 漏了它，开关 B 打开时
+        // 选中项会被新窗口从刚点过的那一项手里抢走
+        userNavigated_ = true;
+        // 不消费事件：选择行为仍由 QListWidget 自己处理
+    }
     if (mode_ == Mode::GroupMode && watched == groupList_->widget() && event->type() == QEvent::Wheel) {
         auto* wheelEvent = static_cast<QWheelEvent*>(event);
         // 向上滚 = 上移
