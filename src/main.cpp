@@ -13,7 +13,6 @@
 #include "utils/ComInitializer.h"
 #include "utils/SingleApp.h"
 #include "utils/SystemTray.h"
-#include "utils/WindowWatcher.h"
 
 int main(int argc, char* argv[]) {
     QApplication a(argc, argv);
@@ -38,16 +37,6 @@ int main(int argc, char* argv[]) {
     qApp->setQuitOnLastWindowClosed(false);
     auto* winSwitcher = new Widget;
     winSwitcher->prepareListWidget(); // 优化：对ListWidget进行预先初始化，首次执行`setCurrentRow`特别耗时(472ms)
-
-    //! 临时脚手架：验证 WindowWatcher 的信号，Task 9 会用真实处理替换掉这段
-    auto* dbgWatcher = new WindowWatcher(&a);
-    QObject::connect(dbgWatcher, &WindowWatcher::newWindowsFound, dbgWatcher, [](const QList<HWND>& added) {
-        qInfo() << "[watch] new windows:" << added;
-    });
-    QObject::connect(dbgWatcher, &WindowWatcher::windowsGone, dbgWatcher, [](const QList<HWND>& gone) {
-        qInfo() << "[watch] gone windows:" << gone;
-    });
-    dbgWatcher->start();
 
     QObject::connect(&a, &QApplication::aboutToQuit, []() {
         unhookWinEvent();

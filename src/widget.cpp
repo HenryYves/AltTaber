@@ -12,6 +12,7 @@
 #include "utils/QtWin.h"
 #include <QWheelEvent>
 #include <QTimer>
+#include <QHideEvent>
 #include <QMetaEnum>
 #include "utils/SystemTray.h"
 #include "utils/ConfigManager.h"
@@ -94,6 +95,11 @@ Widget::Widget(QWidget* parent) : QWidget(parent), ui(new Ui::Widget) {
 
     groupList_ = new GroupWindowList(this);
     groupList_->widget()->installEventFilter(this);   // 滚轮移动高亮（见 Step 2b）
+
+    watcher_ = new WindowWatcher(this);
+    connect(watcher_, &WindowWatcher::newWindowsFound, this, &Widget::onNewWindows);
+    connect(watcher_, &WindowWatcher::windowsGone, this, &Widget::onWindowsGone);
+    // 同线程连接（Widget 拥有 WindowWatcher），所以 QList<HWND> 不需要 qRegisterMetaType
 }
 
 Widget::~Widget() {
@@ -110,6 +116,7 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         {Qt::Key_L, Qt::Key_Right}, // →
     };
     if (key == Qt::Key_Tab && mode_ == Mode::AppMode) { // switch to next or prev
+        userNavigated_ = true;
         auto i = lw->currentRow();
         bool isShiftPressed = (modifiers & Qt::ShiftModifier);
         // weird formula, but works (hhh)
@@ -127,6 +134,7 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         }
         return;
     } else if (mode_ == Mode::AppMode && (key == Qt::Key_Up || key == Qt::Key_Down)) {
+        userNavigated_ = true;
         if (auto item = lw->currentItem()) {
             auto center = lw->visualItemRect(item).center();
             // 转发映射到WheelEvent
@@ -136,6 +144,7 @@ void Widget::keyPressEvent(QKeyEvent* event) {
             QApplication::postEvent(lw, wheelEvent);
         }
     } else if (mode_ == Mode::AppMode && (key == Qt::Key_Left || key == Qt::Key_Right)) { // 默认情况下 左右键可以切换item 只需要处理边界循环即可
+        userNavigated_ = true;
         const int N = lw->count();
         const int i = lw->currentRow();
         if (key == Qt::Key_Left && i == 0)
@@ -143,6 +152,7 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         else if (key == Qt::Key_Right && i == N - 1)
             lw->setCurrentRow(0);
     } else if (mode_ == Mode::AppMode && VimArrows.contains(key)) { // map [K J H L] to [↑ ↓ ← →]
+        userNavigated_ = true;
         QApplication::postEvent(lw, new QKeyEvent(QEvent::KeyPress, VimArrows.value(key), modifiers));
     } else if (mode_ == Mode::GroupMode) {
         // GroupMode 里所有剩下的键都归这一支：设计文档 §2.3 把 Tab / 方向键 / Vim H J K L
@@ -449,7 +459,101 @@ bool Widget::layoutForCurrentMode() {
 bool Widget::requestShow() { // TODO 当前台是开始菜单（Win）时，会导致显示 但无法操控
     mode_ = Mode::AppMode;
     userNavigated_ = false;
-    return prepareListWidget() && forceShow();
+    const bool shown = prepareListWidget() && forceShow();
+    if (shown) {
+        if (cfg.getWatchNewWindows()) {
+            // 先 stop() 再 start()：`WindowWatcher::start()` 里的 seed() 是无条件执行的，
+            // 对**正在运行**的 watcher 裸调 start() 会把"上一 tick 之后新建的窗口"吃进 seed，
+            // 那些窗口再也不会被报出来（静默丢通知）。requestShow() 确实可能被重复调用
+            // （main.cpp:88 的 retry 循环、或焦点被抢走后重按 Alt+Tab），所以不能假设此处是停止态。
+            // 此刻 prepareListWidget() 刚把列表整体重建过，重新播种与列表内容一致，不会漏报。
+            watcher_->stop();
+            watcher_->start();
+        } else {
+            watcher_->stop();
+        }
+    }
+    return shown;
+}
+
+/// 列表一旦离开屏幕就不再轮询。覆写 hideEvent 而不是逐个 hide() 调用点，是因为 hide 的路径
+/// 不止一处（keyReleaseEvent、焦点丢失、requestShow 后的各种收尾），漏一处就会留下一只
+/// 后台不停枚举窗口的定时器
+void Widget::hideEvent(QHideEvent* event) {
+    watcher_->stop();
+    QWidget::hideEvent(event);
+}
+
+void Widget::onNewWindows(const QList<HWND>& added) {
+    if (mode_ != Mode::AppMode || !this->isVisible()) return;
+
+    QList<QListWidgetItem*> newlyAdded;
+    for (auto hwnd: added) {
+        auto path = Util::getWindowProcessPath(hwnd);   // 只为新窗口查，慢操作
+        if (path.isEmpty()) continue;
+
+        // 找已有的同进程项
+        QListWidgetItem* existing = nullptr;
+        for (int i = 0; i < lw->count(); ++i) {
+            if (lw->item(i)->data(Qt::UserRole).value<WindowGroup>().exePath == path) {
+                existing = lw->item(i);
+                break;
+            }
+        }
+
+        if (existing) {
+            // 已有进程多了一个窗口：不新增项，只把窗口并进该组的窗口列表
+            auto group = existing->data(Qt::UserRole).value<WindowGroup>();
+            group.addWindow({Util::getWindowTitle(hwnd), Util::getClassName(hwnd), hwnd});
+            existing->setData(Qt::UserRole, QVariant::fromValue(group));
+        } else {
+            int row = insertAppItem(path, hwnd);
+            if (row >= 0) newlyAdded.append(lw->item(row));
+        }
+    }
+
+    if (newlyAdded.isEmpty()) return;
+    // 开关 B + 手动优先：本次弹出期间用户翻过列表就不再抢
+    if (cfg.getAutoSelectNew() && !userNavigated_)
+        lw->setCurrentItem(newlyAdded.last());
+}
+
+/// 沿用既有排序语义：无使用记录的新进程排到末尾；new_app_second 开启时插到第 2 位
+int Widget::insertAppItem(const QString& exePath, HWND hwnd) {
+    auto group = WindowGroup{};
+    group.exePath = exePath;
+    group.icon = Util::getCachedIcon(exePath, hwnd);   // 有缓存，不慢
+    group.addWindow({Util::getWindowTitle(hwnd), Util::getClassName(hwnd), hwnd});
+
+    auto* item = new QListWidgetItem(group.icon, {});
+    item->setData(Qt::UserRole, QVariant::fromValue(group));
+    item->setSizeHint(lw->gridSize());
+
+    const bool intoSecond = cfg.getNewAppSortSecond() && lw->count() >= 1;
+    const int row = intoSecond ? 1 : lw->count();
+    lw->insertItem(row, item);
+    return row;
+}
+
+void Widget::removeEmptyGroups() {
+    for (int i = lw->count() - 1; i >= 0; --i) {
+        auto group = lw->item(i)->data(Qt::UserRole).value<WindowGroup>();
+        for (int j = group.windows.size() - 1; j >= 0; --j)
+            if (!IsWindow(group.windows[j].hwnd))
+                group.windows.removeAt(j);
+        if (group.windows.isEmpty()) {
+            const bool wasCurrent = (lw->currentRow() == i);
+            delete lw->takeItem(i);
+            if (wasCurrent) lw->setCurrentRow(qBound(0, i, qMax(0, lw->count() - 1)));
+        } else {
+            lw->item(i)->setData(Qt::UserRole, QVariant::fromValue(group));
+        }
+    }
+}
+
+void Widget::onWindowsGone(const QList<HWND>&) {
+    if (mode_ != Mode::AppMode || !this->isVisible()) return;
+    removeEmptyGroups();
 }
 
 /// 该进程的窗口，按最后使用时间降序（复用 Task 5 抽出的排序）
@@ -547,6 +651,8 @@ bool Widget::eventFilter(QObject* watched, QEvent* event) {
         if (auto item = lw->itemAt(cursorPos)) {
             if (lw->currentItem() != item)
                 lw->setCurrentItem(item);
+            // 滚轮（以及转发成滚轮的 ↑↓ / Vim K J）同样属于"用户手动移动选中"
+            userNavigated_ = true;
             auto windowGroup = item->data(Qt::UserRole).value<WindowGroup>();
             if (windowGroup.windows.isEmpty()) return false;
 

@@ -322,7 +322,6 @@ namespace Util {
 
     // about 2ms
     QList<HWND> listValidWindows() {
-        qDebug() << "#List Valid Windows";
         static const bool isUserAdmin = IsUserAnAdmin(); // 和 isProcessElevated(GetCurrentProcess()) 好像没区别？
         using namespace AppUtil;
         QList<HWND> list;

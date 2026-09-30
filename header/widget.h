@@ -8,6 +8,7 @@
 #include "utils/WindowActivationOrder.h"
 #include "utils/WindowInfo.h"
 #include "utils/GroupWindowList.h"
+#include "utils/WindowWatcher.h"
 
 struct WindowGroup;
 
@@ -40,6 +41,7 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
+    void hideEvent(QHideEvent* event) override;
 
 public:
     enum ForegroundChangeSource {
@@ -91,6 +93,15 @@ private:
     /// 该进程的窗口，按最后使用时间降序
     QList<WindowInfo> orderedGroupWindows(const QString& exePath);
 
+    /// 轮询发现的新窗口：AppMode 下并入同进程的组，或为新进程插入一项
+    void onNewWindows(const QList<HWND>& added);
+    /// 轮询发现的已消失窗口：移除窗口已全部关闭的组
+    void onWindowsGone(const QList<HWND>& removed);
+    /// AppMode：为新进程插入一个列表项（沿用既有排序语义：无使用记录 → 末尾）
+    int insertAppItem(const QString& exePath, HWND hwnd);
+    /// 移除窗口已全部关闭的组
+    void removeEmptyGroups();
+
 private:
     Ui::Widget* ui;
     QListWidget* lw = nullptr;
@@ -99,6 +110,7 @@ private:
     QList<HWND> groupWindowOrder; // for Alt+` 同组窗口切换
     Mode mode_ = Mode::AppMode;
     GroupWindowList* groupList_ = nullptr;   // 在构造函数里 new，parent 为 this
+    WindowWatcher* watcher_ = nullptr;       // 同上；只在列表可见时运行
     bool userNavigated_ = false;             // 本次弹出期间用户是否手动翻过列表
 };
 
