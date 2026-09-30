@@ -5,6 +5,7 @@
 #include <Windows.h>
 #include <QListWidget>
 #include <QDebug>
+#include <QPointer>
 #include "utils/WindowActivationOrder.h"
 #include "utils/WindowInfo.h"
 #include "utils/GroupWindowList.h"
@@ -117,8 +118,10 @@ private:
     WindowWatcher* watcher_ = nullptr;       // 同上；只在列表可见时运行
     /// 本次弹出钉住的屏幕（见 targetScreen()）：动态入列会重跑几何，
     /// 若每次都按光标重新选屏，跟随鼠标模式下弹窗会在中途跳到另一个显示器。
-    /// 每次弹出开始时清空、hideEvent 再清一次
-    QScreen* pinnedScreen_ = nullptr;
+    /// 每次弹出开始时清空、hideEvent 再清一次。
+    /// 用 QPointer：QScreen 归 QGuiApplication 所有，显示器被拔掉/拓扑变化时会**立即析构**，
+    /// 裸指针会悬空 —— 而 hideEvent 并不构成寿命上界（弹窗可以一直开着）
+    QPointer<QScreen> pinnedScreen_;
     bool userNavigated_ = false;             // 本次弹出期间用户是否手动翻过列表
 };
 

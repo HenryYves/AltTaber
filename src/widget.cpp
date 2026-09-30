@@ -78,6 +78,10 @@ Widget::Widget(QWidget* parent) : QWidget(parent), ui(new Ui::Widget) {
     // will not take ownership of delegate
     lw->setItemDelegate(new IconOnlyDelegate(lw));
     lw->installEventFilter(this);
+    //! 装在 QAbstractScrollArea **自己**身上的 filter 收不到真实的鼠标事件：项都画在 viewport 上，
+    //! viewport 才是命中测试的结果、也由它消费。必须单独装在 viewport 上（见报告 §9.4 的探针：
+    //! 真实点击只到 viewport，lw 与父窗口都看不到；直接 notify 给 lw 能看到、但那一次不会改选中）
+    lw->viewport()->installEventFilter(this);
 
     connect(lw, &QListWidget::currentItemChanged, this, [this](QListWidgetItem* cur, QListWidgetItem*) {
         if (cur) showLabelForItem(cur);
@@ -94,7 +98,10 @@ Widget::Widget(QWidget* parent) : QWidget(parent), ui(new Ui::Widget) {
     });
 
     groupList_ = new GroupWindowList(this);
-    groupList_->widget()->installEventFilter(this);   // 滚轮移动高亮（见 Step 2b）
+    // 滚轮移动高亮（见 Step 2b）。同样必须装在 viewport 上：滚轮先投递给 viewport，
+    // 只有当它**没消费**（该方向滚不动）时才冒泡到滚动区对象 —— 装在对象上会漏掉另一半方向
+    groupList_->widget()->installEventFilter(this);
+    groupList_->widget()->viewport()->installEventFilter(this);
 
     watcher_ = new WindowWatcher(this);
     connect(watcher_, &WindowWatcher::newWindowsFound, this, &Widget::onNewWindows);
@@ -694,15 +701,20 @@ void Widget::commitGroupSelection() {
 }
 
 bool Widget::eventFilter(QObject* watched, QEvent* event) {
-    if (watched == lw && event->type() == QEvent::MouseButtonPress) {
-        // 鼠标点选同样是"用户手动移动选中"。item 是可选中的（`:363` 那行
-        // `~Qt::ItemIsSelectable` 被注释掉了），点一下就会改 currentItem，
+    // 真实事件的落点是 viewport，不是滚动区对象本身 —— 所以这两个分支都同时匹配"对象"与其 viewport。
+    // 匹配对象那一半不是多余的：滚轮在"该方向滚不动"时确实冒泡到对象上（探针 A6/B2 的阳性对照）
+    const bool onAppList = (watched == lw || watched == lw->viewport());
+    const bool onGroupList = groupList_ && (watched == groupList_->widget() || watched == groupList_->widget()->viewport());
+
+    if (onAppList && event->type() == QEvent::MouseButtonPress) {
+        // 鼠标点选同样是"用户手动移动选中"。item 是可选中的（`:370` 那行
+        // `item->setFlags(... & ~Qt::ItemIsSelectable)` 被注释掉了），点一下就会改 currentItem，
         // 而这条路径不经过 keyPressEvent 的任何分支 —— 漏了它，开关 B 打开时
         // 选中项会被新窗口从刚点过的那一项手里抢走
         userNavigated_ = true;
-        // 不消费事件：选择行为仍由 QListWidget 自己处理
+        // 不消费事件：选择行为仍由 QListWidget 自己处理（重复触发也无害，本分支是幂等的）
     }
-    if (mode_ == Mode::GroupMode && watched == groupList_->widget() && event->type() == QEvent::Wheel) {
+    if (mode_ == Mode::GroupMode && onGroupList && event->type() == QEvent::Wheel) {
         auto* wheelEvent = static_cast<QWheelEvent*>(event);
         // 向上滚 = 上移
         groupList_->moveSelection(wheelEvent->angleDelta().y() > 0 ? -1 : +1);
