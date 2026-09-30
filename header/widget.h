@@ -76,8 +76,10 @@ private:
     static HWND rotateWindowInGroup(const QList<HWND>& windows, HWND current, bool forward = true);
     static HWND rotateNormalWindowInGroup(const QList<HWND>& windows, HWND current, bool forward = true);
 
-    /// 进入 GroupMode：用给定进程的窗口填充竖排列表，并定好初始高亮
-    void enterGroupMode(const QString& exePath, int initialRow);
+    /// 进入 GroupMode：用给定进程的窗口填充竖排列表，并定好初始高亮。
+    /// 返回 false 表示没有进入（exePath 为空 / 没有窗口 / 取不到屏幕），
+    /// 调用方必须按返回值判断，不能拿 mode_ 的旧值当"成功"的信号
+    bool enterGroupMode(const QString& exePath, int initialRow);
     /// Alt 抬起时，GroupMode 的提交动作
     void commitGroupSelection();
     /// 本程序**唯一**的窗口几何计算处：按当前 mode_ 决定内容尺寸，

@@ -23,6 +23,23 @@ static QList<HWND> hwndsOfGroup(const WindowGroup& group) {
     return hwnds;
 }
 
+/// 设计文档 §2.3：GroupMode 下 Tab / 方向键 / Vim H J K L 都只是"上下移动高亮"。
+/// 返回 0 表示该键在 GroupMode 里没有定义移动
+static int groupNavDeltaOf(int key, Qt::KeyboardModifiers modifiers) {
+    switch (key) {
+        case Qt::Key_Tab:   return (modifiers & Qt::ShiftModifier) ? -1 : +1;
+        case Qt::Key_Down:  // ↓
+        case Qt::Key_Right: // →
+        case Qt::Key_J:
+        case Qt::Key_L:     return +1;
+        case Qt::Key_Up:    // ↑
+        case Qt::Key_Left:  // ←
+        case Qt::Key_K:
+        case Qt::Key_H:     return -1;
+        default:            return 0;
+    }
+}
+
 Widget::Widget(QWidget* parent) : QWidget(parent), ui(new Ui::Widget) {
     ui->setupUi(this);
     lw = ui->listWidget;
@@ -92,7 +109,7 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         {Qt::Key_H, Qt::Key_Left},  // ←
         {Qt::Key_L, Qt::Key_Right}, // →
     };
-    if (key == Qt::Key_Tab) { // switch to next or prev
+    if (key == Qt::Key_Tab && mode_ == Mode::AppMode) { // switch to next or prev
         auto i = lw->currentRow();
         bool isShiftPressed = (modifiers & Qt::ShiftModifier);
         // weird formula, but works (hhh)
@@ -109,7 +126,7 @@ void Widget::keyPressEvent(QKeyEvent* event) {
             requestShowGroup();
         }
         return;
-    } else if (key == Qt::Key_Up || key == Qt::Key_Down) {
+    } else if (mode_ == Mode::AppMode && (key == Qt::Key_Up || key == Qt::Key_Down)) {
         if (auto item = lw->currentItem()) {
             auto center = lw->visualItemRect(item).center();
             // 转发映射到WheelEvent
@@ -118,15 +135,24 @@ void Widget::keyPressEvent(QKeyEvent* event) {
                                               Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
             QApplication::postEvent(lw, wheelEvent);
         }
-    } else if (key == Qt::Key_Left || key == Qt::Key_Right) { // 默认情况下 左右键可以切换item 只需要处理边界循环即可
+    } else if (mode_ == Mode::AppMode && (key == Qt::Key_Left || key == Qt::Key_Right)) { // 默认情况下 左右键可以切换item 只需要处理边界循环即可
         const int N = lw->count();
         const int i = lw->currentRow();
         if (key == Qt::Key_Left && i == 0)
             lw->setCurrentRow(N - 1);
         else if (key == Qt::Key_Right && i == N - 1)
             lw->setCurrentRow(0);
-    } else if (VimArrows.contains(key)) { // map [K J H L] to [↑ ↓ ← →]
+    } else if (mode_ == Mode::AppMode && VimArrows.contains(key)) { // map [K J H L] to [↑ ↓ ← →]
         QApplication::postEvent(lw, new QKeyEvent(QEvent::KeyPress, VimArrows.value(key), modifiers));
+    } else if (mode_ == Mode::GroupMode) {
+        // GroupMode 里所有剩下的键都归这一支：设计文档 §2.3 把 Tab / 方向键 / Vim H J K L
+        // 定义成"移动高亮"。放在最后且不判 key，是为了保证**任何**键都不会落进上面那些分支——
+        // 它们操作的是 `lw`（AppMode 的列表），在 GroupMode 下（列表隐藏但 currentItem 仍在）
+        // 会转成 WheelEvent 打到真实窗口上（Task 7 复审 Important：↓ 会把窗口最小化）
+        if (const int delta = groupNavDeltaOf(key, modifiers)) {
+            groupList_->moveSelection(delta);
+            userNavigated_ = true;
+        }
     }
     QWidget::keyPressEvent(event);
 }
@@ -428,10 +454,10 @@ QList<WindowInfo> Widget::orderedGroupWindows(const QString& exePath) {
 }
 
 /// 进入 GroupMode：用给定进程的窗口填充竖排列表，并定好初始高亮
-void Widget::enterGroupMode(const QString& exePath, int initialRow) {
-    if (exePath.isEmpty()) return;
+bool Widget::enterGroupMode(const QString& exePath, int initialRow) {
+    if (exePath.isEmpty()) return false;
     auto windows = orderedGroupWindows(exePath);
-    if (windows.isEmpty()) return;   // 没有窗口就不弹空列表
+    if (windows.isEmpty()) return false;   // 没有窗口就不弹空列表
 
     mode_ = Mode::GroupMode;
     userNavigated_ = false;
@@ -440,7 +466,9 @@ void Widget::enterGroupMode(const QString& exePath, int initialRow) {
     if (!layoutForCurrentMode()) {
         mode_ = Mode::AppMode;       // 取不到屏幕就退回，不留半吊子状态
         groupList_->clear();
+        return false;
     }
+    return true;
 }
 
 /// 入口 A：Alt+` 独立按下（切换器不可见）——列表用「前台窗口所在进程」的窗口
@@ -461,11 +489,14 @@ bool Widget::requestShowGroup() {
     const int delta = backward ? -1 : 1;
     const int initialRow = ((idx + delta) % n + n) % n;
 
-    enterGroupMode(exePath, initialRow);
+    // 按 enterGroupMode() 的**返回值**判断，不能用 mode_ 的旧值：
+    // 调用方原本可能就在 GroupMode（列表已隐藏），此时提前返回会让 mode_ 仍是 GroupMode，
+    // 于是 forceShow() 会把上一条遗留的列表显示出来（且松手还会提交那行）
+    if (!enterGroupMode(exePath, initialRow)) return false;
+
     // 几何算完还得真正把窗口显示出来：情形 A 的切换器原本是隐藏的，
     // 沿用 AppMode 那套防闪烁的 forceShow()（见设计文档 §2.4）。
-    // enterGroupMode 失败时会退回 AppMode，那种情况下不能显示。
-    if (mode_ == Mode::GroupMode && !this->isVisible())
+    if (!this->isVisible())
         forceShow();
     return this->isVisible();
 }
