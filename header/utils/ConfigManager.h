@@ -74,7 +74,7 @@ public:
         return get("dynamic/watch_new_windows", false).toBool();
     }
 
-    /// 新窗口入列时自动把选中项跳过去。开关 A 关闭时此项无效果。
+    /// 新窗口入列时自动把选中项跳过去。`watch_new_windows` 关闭时此项无效果。
     /// In config.ini: [dynamic] \n auto_select_new=true
     bool getAutoSelectNew() {
         return get("dynamic/auto_select_new", false).toBool();

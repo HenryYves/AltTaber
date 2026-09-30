@@ -1,5 +1,6 @@
 ﻿#include "utils/WindowActivationOrder.h"
 #include "utils/Util.h"
+#include <algorithm>
 
 void WindowActivationOrder::record(const QString& exePath, HWND hwnd, const QDateTime& when) {
     order_[exePath].insert(hwnd, when);

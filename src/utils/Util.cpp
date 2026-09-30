@@ -335,7 +335,7 @@ namespace Util {
                 // PostMessage可以，但是无法使用NOACTIVE版本，窗口必被激活
                 // 此时由于权限不足，Hook失效，无法进一步检测 Alt or 任务栏滚轮，导致非常鸡肋
                 // https://stackoverflow.com/questions/13468331/showwindow-function-doesnt-work-when-target-application-is-run-as-administrator
-                qDebug() << "#ignore elevated:" << hwnd << getWindowTitle(hwnd);
+                qDebug() << "#ignore elevated:" << hwnd;
                 continue;
             }
 

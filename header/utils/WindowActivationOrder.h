@@ -19,7 +19,8 @@ public:
     /// 该进程中最近活跃的窗口（不保证仍然有效）
     QPair<HWND, QDateTime> lastActive(const QString& exePath) const;
 
-    /// windows 里最近活跃、且确实有记录的那个；没有则返回 {nullptr, QDateTime()}
+    /// 取 windows 按活跃度排序后**排在最前的那一个**：它有记录就返回它，否则返回 {nullptr, QDateTime()}。
+    /// 注意它**不会**继续往下找"下一个有记录的窗口"——只看第一名，哪怕后面的窗口有记录也不看。
     QPair<HWND, QDateTime> lastValidActive(const QString& exePath, const QList<HWND>& windows) const;
 
     /// 按活跃时间倒序重排 windows；该进程没有任何记录时**保持原顺序不动**

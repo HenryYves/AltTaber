@@ -680,16 +680,16 @@ bool Widget::enterGroupMode(const QString& exePath, int initialRow) {
     // 那里的可见性判据表示"窗口已经抢到屏幕"，而 enterGroupMode() 被调用时入口 A 的窗口还没 show
     // （forceShow() 在调用方里、之后才跑），照抄会让入口 A 只 stop 不 start，
     // 整个组列表期间一次都不轮询 —— 正是本 Step 要防的"静默不生效"。
-    // 所以判据取配置，启动一律是 stop() + start()：`WindowWatcher::start()` 的 seed() 是无条件
-    // 执行的（WindowWatcher.cpp:27），而入口 B（AppMode 可见时按 `）走到这里时 watcher 正跑着，
-    // 裸调 start() 是不安全的。重播 seed 在这里也是必须的：沿用上一条 Alt+Tab 播下的旧集合，
+    // 所以判据取配置。这里的 stop() 只改定时器相位、不承担正确性：`WindowWatcher::start()` 会
+    // 无条件重播 seed（WindowWatcher.cpp:27），而 seed() 整体替换 known_（WindowDiffTracker.h:53-55），
+    // 所以删掉 stop() 不改变任何行为。真正必须的是这次重播：沿用上一条 Alt+Tab 播下的旧集合，
     // 会把「那个时刻之后出现、而此刻**已经**在组列表里的本进程窗口」在下一 tick 又当成"新增"
     // 报一次，列表里就出现两行同一个窗口（窗口集来自 orderedWindowsOf() → listValidWindows(exePath)，
     // 即该进程此刻的全部现存窗口，与 winActiveOrder_ 有没有记录无关）。重播把这段最坏一个 tick 的
     // 时间差压到微秒级；残余的缝隙在另一侧 —— 播种比上面那份列表快照晚一瞬，那一瞬里新建的窗口
     // 会进 seed 却不在列表里，于是不会被报出来（漏一行，而不是重复）。顺序与 brief 一致
     // （列表快照在前、播种在后），与 Task 9 在 AppMode 容忍的是同一类微秒级缝隙。
-    watcher_->stop();
+    watcher_->stop();   // 只为对齐定时器相位；start() 自己会无条件重播 seed，删掉本行不改变行为
     if (cfg.getWatchNewWindows()) watcher_->start();
     groupList_->fill(windows);
     groupList_->setCurrentRow(initialRow);
@@ -715,7 +715,7 @@ bool Widget::requestShowGroup() {
         // 初始高亮第 0 行 = 该组最后使用的窗口（按活跃度降序的首行，见 orderedGroupWindows）。
         // 不变式（**当该组最近使用的窗口此刻仍是有效窗口时**成立）：按 ` 再松手 == 什么都不做的松手。
         // 该条件不成立时（MRU 窗口已被关闭/被过滤，或列表构建后窗口集有变），AppMode 的释放回退
-        // 会去读未排序的旧快照（见 widget.cpp:234 的既有 TODO），此时本入口反而更准。
+        // 会去读未排序的旧快照（见 widget.cpp:251 的既有 TODO），此时本入口反而更准。
         // 必须用返回值：丢掉它会让"陈旧 GroupMode"那一类 bug 复活（Task 7 的修复轮刚堵掉）
         if (!enterGroupMode(exePath, 0)) return false;
         return this->isVisible();
@@ -759,18 +759,18 @@ void Widget::commitGroupSelection() {
 }
 
 bool Widget::eventFilter(QObject* watched, QEvent* event) {
-    // 真实事件的落点是 viewport，不是滚动区对象本身 —— 所以这两个分支都同时匹配"对象"与其 viewport。
-    // 匹配对象那一半不是多余的：滚轮在"该方向滚不动"时确实冒泡到对象上（探针 A6/B2 的阳性对照）
+    // 真实事件的落点是 viewport 而非滚动区对象本身，所以两个分支都同时匹配"对象"与其 viewport。
+    // 对象那一半不多余：`:151` 的 ↑↓ 转发是 `postEvent(lw, …)`，直接投给对象（实测 watched == lw），旧注释的"滚轮冒泡"说法不成立。
     const bool onAppList = (watched == lw || watched == lw->viewport());
     const bool onGroupList = groupList_ && (watched == groupList_->widget() || watched == groupList_->widget()->viewport());
 
-    if (onAppList && event->type() == QEvent::MouseButtonPress) {
-        // 鼠标点选同样是"用户手动移动选中"。item 是可选中的（`:370` 那行
-        // `item->setFlags(... & ~Qt::ItemIsSelectable)` 被注释掉了），点一下就会改 currentItem，
-        // 而这条路径不经过 keyPressEvent 的任何分支 —— 漏了它，开关 B 打开时
-        // 选中项会被新窗口从刚点过的那一项手里抢走
+    if ((onAppList || onGroupList) && event->type() == QEvent::MouseButtonPress) {
+        // 鼠标点选同样是"用户手动移动选中"。app 列表的 item 是可点选的（`:370` 那行
+        // `item->setFlags(... & ~Qt::ItemIsSelectable)` 被注释掉了），点一下就会改 currentItem；
+        // 组列表同理，点一下会改 currentRow，而动态入列路径在 `:534` 读的就是这个标志。两条都不
+        // 经过 keyPressEvent 的任何分支 —— 漏一个，开关 B 打开时选中项就会被新窗口从刚点过的那一项手里抢走
         userNavigated_ = true;
-        // 不消费事件：选择行为仍由 QListWidget 自己处理（重复触发也无害，本分支是幂等的）
+        // 不消费事件：选择行为仍由各自的视图自己处理（重复触发也无害，本分支是幂等的）
     }
     if (mode_ == Mode::GroupMode && onGroupList && event->type() == QEvent::Wheel) {
         auto* wheelEvent = static_cast<QWheelEvent*>(event);
