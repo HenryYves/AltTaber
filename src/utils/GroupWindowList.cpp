@@ -10,6 +10,10 @@ GroupWindowList::GroupWindowList(QWidget* parent) {
     list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     list_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     list_->setFrameShape(QFrame::NoFrame);
+    // ! 基础态那句 `background-color: transparent` 不是多余的：Qt 只在这个选择器命中
+    // ! 且真的画了盒子时才会套用 `padding-*`。少了它，未选中行不缩进（文字 x=3）、
+    // ! 选中行却缩进一次（x=15），看起来就是"选中项往右跳 12px"。
+    // ! 离屏探针实测：加上后两态文字 x 都是 15、高亮仍是满宽（见 HANDOFF 2026-10-07 一节）。
     list_->setStyleSheet(R"(
         QListWidget {
             background-color: transparent;
@@ -18,6 +22,7 @@ GroupWindowList::GroupWindowList(QWidget* parent) {
         }
         QListWidget::item {
             color: rgb(240, 240, 240);
+            background-color: transparent;
             padding-left: 12px;
             padding-right: 12px;
         }
