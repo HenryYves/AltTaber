@@ -123,7 +123,7 @@ Both default to `false`. `auto_select_new` has no effect while `watch_new_window
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `watch_new_windows` | bool | `false` | While the switcher is open, poll for newly appeared background windows at 300 ms and insert them into the list. Closed windows are removed symmetrically. |
-| `auto_select_new` | bool | `false` | When a new window is inserted, move the selection onto it. Yields to manual navigation: once you press an arrow / a Vim arrow / the wheel during the current popup (Tab too, while in the app list), the selection stops being taken over until the next popup. |
+| `auto_select_new` | bool | `false` | When a new window is inserted, move the selection onto it. Yields to manual navigation: once you press `` ` `` / an arrow / a Vim arrow / the wheel during the current popup (Tab too, while in the app list), the selection stops being taken over until the next popup. |
 
 ---
 

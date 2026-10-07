@@ -137,10 +137,13 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         auto index = (i - (2 * isShiftPressed - 1) + lw->count()) % lw->count();
         lw->setCurrentRow(index);
     } else if (key == Qt::Key_QuoteLeft && (modifiers & Qt::AltModifier)) {
+        const int delta = (modifiers & Qt::ShiftModifier) ? -1 : 1;
         if (mode_ == Mode::GroupMode && this->isVisible()) {
-            // 情形 C：已在组列表内 —— 回应用切换器，与 Tab 同义。
-            // 于是组内导航只剩方向键 / Vim HJKL / 滚轮（原先 ` 也是组内移动键）
-            exitGroupModeToApp();
+            // 情形 C：已在组列表内 —— 移动高亮（与方向键 / Vim HJKL / 滚轮同义）。
+            // 注意：**不**回到应用切换器。用户试过之后明确要它保持组内移动，
+            // 回应用列表那条路留给 Tab（见本函数开头那一支）
+            groupList_->moveSelection(delta);
+            userNavigated_ = true;
         } else {
             // 情形 A（不可见）/ 情形 B（AppMode 可见，由 Task 8 接管）
             requestShowGroup();
@@ -169,7 +172,7 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         QApplication::postEvent(lw, new QKeyEvent(QEvent::KeyPress, VimArrows.value(key), modifiers));
     } else if (mode_ == Mode::GroupMode) {
         // GroupMode 里所有剩下的键都归这一支：设计文档 §2.3 把方向键 / Vim H J K L 定义成
-        // "移动高亮"（Tab 与 ` 已改为"回应用切换器"，见上面两支与 exitGroupModeToApp()）。
+        // "移动高亮"（Tab 已改为"回应用切换器"，见函数开头那一支；` 仍走上面自己的分支）。
         // 放在最后且不判 key，是为了保证**任何**键都不会落进上面那些分支——
         // 它们操作的是 `lw`（AppMode 的列表），在 GroupMode 下（列表隐藏但 currentItem 仍在）
         // 会转成 WheelEvent 打到真实窗口上（Task 7 复审 Important：↓ 会把窗口最小化）
