@@ -28,7 +28,8 @@ static QList<HWND> hwndsOfGroup(const WindowGroup& group) {
 /// 返回 0 表示该键在 GroupMode 里没有定义移动
 static int groupNavDeltaOf(int key, Qt::KeyboardModifiers modifiers) {
     switch (key) {
-        case Qt::Key_Tab:   return (modifiers & Qt::ShiftModifier) ? -1 : +1;
+        // 注意：Tab 不在这里。它在 GroupMode 下已被截走（"回应用切换器"），
+        // 不是组内移动键。真落进来的话 delta=0，什么都不做 —— 这是安全的默认
         case Qt::Key_Down:  // ↓
         case Qt::Key_Right: // →
         case Qt::Key_J:
@@ -102,6 +103,7 @@ Widget::Widget(QWidget* parent) : QWidget(parent), ui(new Ui::Widget) {
     // 只有当它**没消费**（该方向滚不动）时才冒泡到滚动区对象 —— 装在对象上会漏掉另一半方向
     groupList_->widget()->installEventFilter(this);
     groupList_->widget()->viewport()->installEventFilter(this);
+    setupGroupListFont();   // [group_list] 的字号/字体；与 setupLabelFont 同款，配置编辑后重应用
 
     watcher_ = new WindowWatcher(this);
     connect(watcher_, &WindowWatcher::newWindowsFound, this, &Widget::onNewWindows);
@@ -122,6 +124,11 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         {Qt::Key_H, Qt::Key_Left},  // ←
         {Qt::Key_L, Qt::Key_Right}, // →
     };
+    if (key == Qt::Key_Tab && mode_ == Mode::GroupMode && this->isVisible()) {
+        // 与入口 B 对称：组列表里按 Alt+Tab 回到应用切换器（高亮停在组列表所属的那个应用）
+        exitGroupModeToApp();
+        return;
+    }
     if (key == Qt::Key_Tab && mode_ == Mode::AppMode) { // switch to next or prev
         userNavigated_ = true;
         auto i = lw->currentRow();
@@ -130,11 +137,10 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         auto index = (i - (2 * isShiftPressed - 1) + lw->count()) % lw->count();
         lw->setCurrentRow(index);
     } else if (key == Qt::Key_QuoteLeft && (modifiers & Qt::AltModifier)) {
-        const int delta = (modifiers & Qt::ShiftModifier) ? -1 : 1;
         if (mode_ == Mode::GroupMode && this->isVisible()) {
-            // 情形 C：已在组列表内 —— 移动高亮
-            groupList_->moveSelection(delta);
-            userNavigated_ = true;
+            // 情形 C：已在组列表内 —— 回应用切换器，与 Tab 同义。
+            // 于是组内导航只剩方向键 / Vim HJKL / 滚轮（原先 ` 也是组内移动键）
+            exitGroupModeToApp();
         } else {
             // 情形 A（不可见）/ 情形 B（AppMode 可见，由 Task 8 接管）
             requestShowGroup();
@@ -162,8 +168,9 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         userNavigated_ = true;
         QApplication::postEvent(lw, new QKeyEvent(QEvent::KeyPress, VimArrows.value(key), modifiers));
     } else if (mode_ == Mode::GroupMode) {
-        // GroupMode 里所有剩下的键都归这一支：设计文档 §2.3 把 Tab / 方向键 / Vim H J K L
-        // 定义成"移动高亮"。放在最后且不判 key，是为了保证**任何**键都不会落进上面那些分支——
+        // GroupMode 里所有剩下的键都归这一支：设计文档 §2.3 把方向键 / Vim H J K L 定义成
+        // "移动高亮"（Tab 与 ` 已改为"回应用切换器"，见上面两支与 exitGroupModeToApp()）。
+        // 放在最后且不判 key，是为了保证**任何**键都不会落进上面那些分支——
         // 它们操作的是 `lw`（AppMode 的列表），在 GroupMode 下（列表隐藏但 currentItem 仍在）
         // 会转成 WheelEvent 打到真实窗口上（Task 7 复审 Important：↓ 会把窗口最小化）
         if (const int delta = groupNavDeltaOf(key, modifiers)) {
@@ -222,6 +229,30 @@ void Widget::setupLabelFont() {
     // auto reload
     connect(&cfg, &ConfigManager::configEdited, this, [] {
         reloadLabelFontCfg();
+    });
+}
+
+/// 组列表（Alt+`）的字号/字体。与 setupLabelFont() 同款：构造时应用一次，配置编辑后重应用。
+/// 两个键都可选，**都不写就不动字体**（沿用继承来的默认字体 = 既有观感）：
+/// 行高与宽度上限由 GroupWindowList::applyFont() 按新字体的度量派生，
+/// 默认字体下派生结果与改动前逐像素一致（真机实测见 docs/2026-10-07-group-list-font-design.md §3.2）
+void Widget::setupGroupListFont() {
+    const QFont base = groupList_->widget()->font();   // 基准只取一次，反复 apply 不会拿上一次的结果当基准
+    const QStringList Fallback = {"Microsoft YaHei UI", "Microsoft YaHei", "Consolas"}; // fallback
+    auto reloadGroupListFontCfg = [this, base, Fallback] {
+        QFont font = base;
+        const int size = cfg.get("group_list/font_size", -1).toInt();
+        if (size > 0) font.setPointSize(size);   // <=0 / 非数字：当成"没配"，不给 0pt 的不可见字
+        const auto family = cfg.get("group_list/font_family", QString()).toString();
+        if (!family.isEmpty()) font.setFamilies(QStringList{family} << Fallback);
+        groupList_->applyFont(font);
+        qDebug() << "Group list font:" << font.families() << "-> actual" << QFontInfo(font).family();
+    };
+    reloadGroupListFontCfg();
+
+    // auto reload
+    connect(&cfg, &ConfigManager::configEdited, this, [reloadGroupListFontCfg] {
+        reloadGroupListFontCfg();
     });
 }
 
@@ -438,6 +469,13 @@ bool Widget::layoutForCurrentMode() {
         lw->hide();
         ui->label->hide();
         auto* view = groupList_->widget();
+        // 字号放大后宽度上限跟着放宽（GroupWindowList::effectiveMaxWidth），但不能超出屏幕：
+        // 下面只做居中、没有任何地方兜宽度，超宽会被裁在屏幕两侧。
+        // 必须在 preferredSize() 之前设：setWidthCap() 会顺带重排每一行的 sizeHint
+        if (auto* screen = targetScreen()) {
+            const auto avail = screen->availableGeometry().width();
+            groupList_->setWidthCap(avail - ListWidgetMargin.left() - ListWidgetMargin.right());
+        }
         view->setFixedSize(groupList_->preferredSize());
         view->show();
         content = view;
@@ -483,6 +521,14 @@ bool Widget::requestShow() { // TODO 当前台是开始菜单（Win）时，会�
     mode_ = Mode::AppMode;
     userNavigated_ = false;
     pinnedScreen_ = nullptr;   // 新的一次弹出：重新按配置选屏（见 targetScreen()）
+    // 记录「出发应用」：入口 B（切换器已可见时按 `）用它决定展示哪一组窗口。
+    // 只在**本窗口还没显示**时取 —— requestShow() 会被 main.cpp 的重试循环和"重复按 Alt+Tab"
+    // 调用，那时前台已经是本窗口自己，取到的没有意义。不可接受的窗口（桌面、系统过渡窗口）不记，
+    // 免得把出发应用记成一个迟早解析不出进程路径的东西 —— 入口 B 会退回高亮项那份旧定义。
+    if (!this->isVisible()) {
+        if (auto fg = GetForegroundWindow(); fg != this->hWnd() && Util::isWindowAcceptable(fg))
+            foregroundAtShow_ = fg;
+    }
     const bool shown = prepareListWidget() && forceShow();
 
     // 判据是"列表此刻在不在屏幕上"，不是 forceShow() 的返回值 —— 后者只表示"抢到前台"。
@@ -703,17 +749,24 @@ bool Widget::enterGroupMode(const QString& exePath, int initialRow) {
 }
 
 /// 入口 A：Alt+` 独立按下（切换器不可见）——列表用「前台窗口所在进程」的窗口
-/// 入口 B：切换器已可见时按 ` —— 列表用「当前选中项」所在进程的窗口（见函数开头）
+/// 入口 B：切换器已可见时按 ` —— 列表用「**出发应用**」所在进程的窗口（见函数开头）
 bool Widget::requestShowGroup() {
-    // 入口 B：AppMode 可见时按 ` —— 用「当前选中项」所在进程，而不是前台窗口
-    // （此时前台窗口是本 Widget 自己，取它没有意义）
+    // 入口 B：AppMode 可见时按 ` —— 用「出发应用」= 切换器弹出那一刻的前台窗口，而不是当前高亮项。
+    // 用户要求 Alt+` 恒等于"我现在所在应用（=A）的窗口列表"，与高亮移到哪个应用无关；
+    // 不能在**这里**再取 GetForegroundWindow()：此时前台窗口是本 Widget 自己，取它没有意义。
     if (mode_ == Mode::AppMode && this->isVisible()) {
-        auto* cur = lw->currentItem();
-        if (!cur) return false;
-        auto exePath = cur->data(Qt::UserRole).value<WindowGroup>().exePath;
+        QString exePath;
+        if (foregroundAtShow_) exePath = Util::getWindowProcessPath(foregroundAtShow_);
+        // 出发窗口可能在这期间被关掉/被过滤掉，解析不出进程路径 —— 退回"高亮项"那份更老的定义，
+        // 保证按了 ` 不会没反应（代价是那时又回到"跟着高亮走"）
+        if (exePath.isEmpty()) {
+            if (auto* cur = lw->currentItem())
+                exePath = cur->data(Qt::UserRole).value<WindowGroup>().exePath;
+        }
         if (exePath.isEmpty()) return false;
         // 初始高亮第 0 行 = 该组最后使用的窗口（按活跃度降序的首行，见 orderedGroupWindows）。
         // 不变式（**当该组最近使用的窗口此刻仍是有效窗口时**成立）：按 ` 再松手 == 什么都不做的松手。
+        // 换用出发应用之后它依然成立：你刚从那个窗口过来 ⇒ 它就是该组的 MRU ⇒ 第 0 行就是它。
         // 该条件不成立时（MRU 窗口已被关闭/被过滤，或列表构建后窗口集有变），AppMode 的释放回退
         // 会去读未排序的旧快照（见 widget.cpp:251 的既有 TODO），此时本入口反而更准。
         // 必须用返回值：丢掉它会让"陈旧 GroupMode"那一类 bug 复活（Task 7 的修复轮刚堵掉）
@@ -756,6 +809,34 @@ void Widget::commitGroupSelection() {
         Util::switchToWindow(hwnd);
         qInfo() << "(Alt+`)Switch to" << Util::getWindowTitle(hwnd) << Util::getClassName(hwnd);
     }
+}
+
+/// 从组列表回到应用切换器：GroupMode 下按 Tab 或 ` 都走这里。
+/// 高亮停在「组列表所属的那个应用」上 —— 那正是你进组列表前所在的位置，
+/// 于是"按 Tab/` 再松手 == 原地不动"（AppMode 松手会切到该组的 MRU 窗口，而它在第 0 行），
+/// 与入口 B 的"按 ` 再松手 == 什么都不做"成对。
+/// 找不到对应项（该应用的窗口在此期间全关掉了）就保持原来的高亮不动。
+void Widget::exitGroupModeToApp() {
+    const QString exePath = currentGroupExePath_;
+
+    mode_ = Mode::AppMode;
+    currentGroupExePath_.clear();
+    userNavigated_ = false;   // 新的一屏交互，自动选中可以重新接管（与 requestShow() 一致）
+    groupList_->clear();      // 内容下次进入时会重新填充
+
+    if (!exePath.isEmpty()) {
+        for (int i = 0; i < lw->count(); ++i) {
+            if (lw->item(i)->data(Qt::UserRole).value<WindowGroup>().exePath == exePath) {
+                lw->setCurrentRow(i);
+                break;
+            }
+        }
+    }
+    // 回到 AppMode 的几何。失败（取不到屏幕）时不动 mode_：与 enterGroupMode() 的收尾不同，
+    // 这里退回 GroupMode 反而会留下"隐藏着的组列表"，不如就地停在 AppMode（列表仍是可见的）
+    if (!layoutForCurrentMode())
+        qWarning() << "exitGroupModeToApp: layoutForCurrentMode failed";
+    showLabelForItem(lw->currentItem());
 }
 
 bool Widget::eventFilter(QObject* watched, QEvent* event) {

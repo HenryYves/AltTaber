@@ -12,6 +12,10 @@ DisplayMonitor=1
 font_size=10
 font_family=Microsoft YaHei UI
 
+[group_list]
+font_size=13
+font_family=方正清刻本悦宋简体
+
 [blacklist]
 file_names=obsidian.exe, slack.exe
 
@@ -47,6 +51,34 @@ Controls the label text shown under each app icon.
 |-----|------|---------|-------------|
 | `font_size` | int | `10` | Font point size |
 | `font_family` | string | `Microsoft YaHei UI` | Preferred font; falls back to Microsoft YaHei → Consolas |
+
+---
+
+### `[group_list]` — Font for the Alt+`` ` `` window list
+
+Controls the font of the vertical window list shown by Alt+`` ` ``. Independent of `[label]`.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `font_size` | int | (unset) | Font point size. `<=0` or non-numeric counts as unset |
+| `font_family` | string | (unset) | Preferred font; falls back to Microsoft YaHei UI → Microsoft YaHei → Consolas |
+
+**Both keys are optional. With neither set, the system default font is used**, which is identical to not having this section at all.
+
+```ini
+[group_list]
+font_size=13
+font_family=方正清刻本悦宋简体
+```
+
+When the font grows, **row height and width cap grow with it** — otherwise large text would be clipped by the row and long titles would elide too early:
+
+- row height = `max(28, font height + 8)`
+- width cap = `480 × (font height ÷ default font height)`, then clamped to the target screen's available width
+
+The default font is Microsoft YaHei UI 9pt (height 15px), which makes both exactly **28** and **480** — i.e. leaving this unset changes nothing pixel-wise.
+
+Saving the file applies it immediately; no restart needed.
 
 ---
 
@@ -91,7 +123,7 @@ Both default to `false`. `auto_select_new` has no effect while `watch_new_window
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `watch_new_windows` | bool | `false` | While the switcher is open, poll for newly appeared background windows at 300 ms and insert them into the list. Closed windows are removed symmetrically. |
-| `auto_select_new` | bool | `false` | When a new window is inserted, move the selection onto it. Yields to manual navigation: once you press Tab / `` ` `` / an arrow / the wheel during the current popup, the selection stops being taken over until the next popup. |
+| `auto_select_new` | bool | `false` | When a new window is inserted, move the selection onto it. Yields to manual navigation: once you press an arrow / a Vim arrow / the wheel during the current popup (Tab too, while in the app list), the selection stops being taken over until the next popup. |
 
 ---
 

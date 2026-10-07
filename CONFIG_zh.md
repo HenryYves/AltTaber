@@ -12,6 +12,10 @@ DisplayMonitor=1
 font_size=10
 font_family=Microsoft YaHei UI
 
+[group_list]
+font_size=13
+font_family=方正清刻本悦宋简体
+
 [blacklist]
 file_names=obsidian.exe, slack.exe
 
@@ -47,6 +51,34 @@ auto_select_new=true
 |-----|------|--------|------|
 | `font_size` | int | `10` | 字体大小（磅） |
 | `font_family` | string | `Microsoft YaHei UI` | 首选字体；加载失败时依次尝试 Microsoft YaHei → Consolas |
+
+---
+
+### `[group_list]` — Alt+`` ` `` 组窗口列表的字体
+
+控制 Alt+`` ` `` 弹出的竖排窗口列表的字号与字体。与 `[label]` 各自独立，互不影响。
+
+| 键 | 类型 | 默认值 | 说明 |
+|-----|------|--------|------|
+| `font_size` | int | （不设置） | 字体大小（磅）。`≤0` 或非数字视为未设置 |
+| `font_family` | string | （不设置） | 首选字体；加载失败时依次尝试 Microsoft YaHei UI → Microsoft YaHei → Consolas |
+
+**两个键都可以不写：都不写就沿用系统默认字体**，与不带这一节时完全一致。
+
+```ini
+[group_list]
+font_size=13
+font_family=方正清刻本悦宋简体
+```
+
+字号变大时**行高与宽度上限都会跟着放宽**，否则大字会被行高裁掉、长标题会过早省略：
+
+- 行高 = `max(28, 字高 + 8)`
+- 宽度上限 = `480 × (字高 ÷ 默认字体字高)`，再受目标屏幕可用宽度兜底
+
+默认字体是 Microsoft YaHei UI 9pt（字高 15px），此时两者正好是 **28** 与 **480** —— 也就是不配置时与改动前逐像素一致。
+
+改完保存即生效，不用重启。
 
 ---
 
@@ -90,7 +122,7 @@ new_app_second=true
 | 键 | 类型 | 默认 | 说明 |
 |-----|------|---------|-------------|
 | `watch_new_windows` | bool | `false` | 切换器显示期间以 300ms 轮询新出现的后台窗口并插入列表；窗口关闭时对称移除。 |
-| `auto_select_new` | bool | `false` | 新窗口入列时把选中项移到它上面。会让位于手动操作：本次弹出期间一旦按过 Tab / `` ` `` / 方向键 / 滚轮，就不再抢选中，直到下次弹出。 |
+| `auto_select_new` | bool | `false` | 新窗口入列时把选中项移到它上面。会让位于手动操作：本次弹出期间一旦按过方向键 / Vim 方向键 / 滚轮（在应用列表里按 Tab 也算），就不再抢选中，直到下次弹出。 |
 
 ---
 

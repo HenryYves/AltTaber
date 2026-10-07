@@ -1,4 +1,5 @@
 ﻿#include "utils/GroupWindowList.h"
+#include <QApplication>
 #include <QFontMetrics>
 
 GroupWindowList::GroupWindowList(QWidget* parent) {
@@ -32,6 +33,33 @@ GroupWindowList::GroupWindowList(QWidget* parent) {
         }
     )");
     list_->hide();
+    // 用继承来的字体初始化行高/宽度缩放。此时它是应用默认字体，所以 rowHeight_ 仍是 28、
+    // widthScale_ 仍是 1.0 —— 不配置 [group_list] 时一切都与改动前一致
+    applyFont(list_->font());
+}
+
+void GroupWindowList::applyFont(const QFont& font) {
+    list_->setFont(font);
+    const QFontMetrics fm(font);
+    // 行高随字号走。下限 28 = 默认字体下的高度，所以不配置时行高不变（真机实测见头文件注释）
+    rowHeight_ = qMax(DefaultRowHeight, fm.height() + 8);
+    // 宽度上限按「相对应用默认字体的字高比」等比放宽。基准取 QApplication::font() 而不是写死
+    // 15px，是为了在 100%/125%/150% DPI 下都自动成立：默认字体下比值恒为 1.0 → 上限仍是 480
+    const int baseHeight = QFontMetrics(QApplication::font()).height();
+    widthScale_ = baseHeight > 0 ? double(fm.height()) / double(baseHeight) : 1.0;
+    applyPreferredWidth();
+}
+
+void GroupWindowList::setWidthCap(int px) {
+    widthCap_ = px;
+    // 行的 sizeHint 也要一起更新：只改视图尺寸会让高亮条比视图窄
+    applyPreferredWidth();
+}
+
+int GroupWindowList::effectiveMaxWidth() const {
+    int w = int(MaxWidth * widthScale_ + 0.5);
+    if (widthCap_ > 0) w = qMin(w, widthCap_);
+    return qMax(MinWidth, w);   // 屏幕兜底再狠也不能把上限压到下限之下
 }
 
 void GroupWindowList::clear() {
@@ -67,7 +95,7 @@ HWND GroupWindowList::currentHwnd() const {
 int GroupWindowList::append(const WindowInfo& info) {
     auto* item = new QListWidgetItem(info.title);
     item->setData(Qt::UserRole, QVariant::fromValue(info));
-    item->setSizeHint(QSize(MinWidth, RowHeight));
+    item->setSizeHint(QSize(MinWidth, rowHeight_));
     list_->addItem(item);
     applyPreferredWidth();   // 新行可能更长，宽度要跟着变
     return list_->count() - 1;
@@ -85,19 +113,19 @@ int GroupWindowList::removeByHwnd(HWND hwnd) {
 }
 
 QSize GroupWindowList::preferredSize() const {
-    // 宽度按最长标题算，clamp 到 [MinWidth, MaxWidth]
+    // 宽度按最长标题算，clamp 到 [MinWidth, 随字号放宽后的上限]
     int textWidth = 0;
     for (int i = 0; i < list_->count(); ++i)
         textWidth = qMax(textWidth, list_->fontMetrics().horizontalAdvance(list_->item(i)->text()));
-    const int width = qBound(MinWidth, textWidth + PaddingH, MaxWidth);
+    const int width = qBound(MinWidth, textWidth + PaddingH, effectiveMaxWidth());
     const int rows = qBound(1, list_->count(), MaxVisibleRows);
-    return {width, rows * RowHeight + PaddingV};
+    return {width, rows * rowHeight_ + PaddingV};
 }
 
 void GroupWindowList::applyPreferredWidth() {
     const int width = preferredSize().width();
     for (int i = 0; i < list_->count(); ++i)
-        list_->item(i)->setSizeHint(QSize(width, RowHeight));
+        list_->item(i)->setSizeHint(QSize(width, rowHeight_));
     list_->setFixedWidth(width);
 }
 
@@ -106,7 +134,7 @@ void GroupWindowList::fill(const QList<WindowInfo>& windows) {
     for (auto& info: windows) {
         auto* item = new QListWidgetItem(info.title);
         item->setData(Qt::UserRole, QVariant::fromValue(info));
-        item->setSizeHint(QSize(MinWidth, RowHeight));   // 宽度先占位，下面统一重设
+        item->setSizeHint(QSize(MinWidth, rowHeight_));   // 宽度先占位，下面统一重设
         list_->addItem(item);
     }
     applyPreferredWidth();

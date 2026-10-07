@@ -94,6 +94,13 @@ private:
     /// 该进程的窗口，按最后使用时间降序
     QList<WindowInfo> orderedGroupWindows(const QString& exePath);
 
+    /// 组列表的字号/字体（[group_list]）：构造时应用一次，配置被编辑后重新应用
+    void setupGroupListFont();
+    /// 从组列表回到应用切换器（GroupMode 下 Tab 与 ` 都走这里）。
+    /// 高亮停在「组列表所属的那个应用」上，于是"按 Tab/` 再松手 == 原地不动"，
+    /// 与入口 B 的"按 ` 再松手 == 什么都不做"成对
+    void exitGroupModeToApp();
+
     /// `lw` 的宽度公式（项数 × 栅格宽 + 修正）。只此一处：
     /// 列表是 IconMode + 不换行 + 无滚动条，宽度必须正好等于内容宽，
     /// 所以 prepareListWidget() 与动态入列/移除三条路径都要调它
@@ -116,6 +123,10 @@ private:
     /// GroupMode 期间"本组"的进程路径：动态扫描靠它过滤掉别的进程的新窗口。
     /// 在 enterGroupMode() 里随 mode_ 一起设置，onNewWindows() 只读
     QString currentGroupExePath_;
+    /// 切换器弹出那一刻的前台窗口 = 入口 B 的「出发应用」。**只在本窗口还没显示时记录**：
+    /// requestShow() 会被 main.cpp 的重试循环与重复按 Alt+Tab 调用，那时前台已经是本窗口自己，
+    /// GetForegroundWindow() 取到的没有意义（入口 B 原来就是因为这点才改用高亮项）
+    HWND foregroundAtShow_ = nullptr;
     Mode mode_ = Mode::AppMode;
     GroupWindowList* groupList_ = nullptr;   // 在构造函数里 new，parent 为 this
     WindowWatcher* watcher_ = nullptr;       // 同上；只在列表可见时运行
