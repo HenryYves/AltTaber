@@ -85,16 +85,19 @@ Controls the label text shown under each app icon.
 
 ---
 
-### `[group_list]` — Font for the Alt+`` ` `` window list
+### `[group_list]` — Font and thumbnails for the Alt+`` ` `` window list
 
-Controls the font of the vertical window list shown by Alt+`` ` ``. Independent of `[label]`.
+Controls the vertical window list shown by Alt+`` ` ``: its font, and the live preview of the highlighted window. Independent of `[label]`.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `font_size` | int | (unset) | Font point size. `<=0` or non-numeric counts as unset |
 | `font_family` | string | (unset) | Preferred font; falls back to Microsoft YaHei UI → Microsoft YaHei → Consolas |
+| `thumbnail` | bool | `false` | Show a live DWM preview of the highlighted window to the right of the list |
+| `thumbnail_width` | int | `320` | Width of the preview box in logical pixels; clamped to `80`–`2000` |
+| `thumbnail_height` | int | `180` | Height of the preview box in logical pixels; clamped to `60`–`2000` |
 
-**Both keys are optional. With neither set, the system default font is used**, which is identical to not having this section at all.
+**Both font keys are optional. With neither set, the system default font is used**, which is identical to not having this section at all.
 
 ```ini
 [group_list]
@@ -109,7 +112,23 @@ When the font grows, **row height and width cap grow with it** — otherwise lar
 
 The default font is Microsoft YaHei UI 9pt (height 15px), which makes both exactly **28** and **480** — i.e. leaving this unset changes nothing pixel-wise.
 
-Saving the file applies it immediately; no restart needed.
+**Thumbnail preview** — set `thumbnail=true` to show a live DWM preview of the window currently highlighted in the list, to its right (separated by a 12 px gap). The preview follows the selection; rapid moves are coalesced on a 60 ms timer so scrolling through rows does not flicker.
+
+```ini
+[group_list]
+thumbnail=true
+thumbnail_width=320
+thumbnail_height=180
+```
+
+- Only the **client area** of the source window is captured — no title bar and no window border. (A title bar drawn by the app itself is part of the client area and will show.)
+- The preview is scaled **proportionally** to fit inside the `thumbnail_width` × `thumbnail_height` box. The box is an upper bound, not a forced size, so wide windows get a shorter preview and tall windows a narrower one. The box itself is further clamped to the target screen's available area, so an oversized configuration cannot push the popup off-screen.
+- It is shown **only in the Alt+`` ` `` group list**; the Alt+Tab app list is unaffected.
+- **Minimized windows show no preview** (DWM has no reliable content for them); they are still listed and selectable. The same applies to DWM-cloaked windows.
+- `thumbnail_width` and `thumbnail_height` have no effect while `thumbnail` is `false`.
+- With `thumbnail=false` (the default), no preview is registered and no space is reserved: layout, sizes and appearance are **pixel-identical to previous versions**.
+
+Saved changes apply on the next popup; no restart needed.
 
 ---
 
