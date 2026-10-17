@@ -330,9 +330,14 @@ void Widget::notifyForegroundChanged(HWND hwnd, ForegroundChangeSource source) {
 /// collect, filter, sort Windows for presentation
 QList<WindowGroup> Widget::prepareWindowGroupList() {
     QMap<QString, WindowGroup> winGroupMap;
+    // 多屏选项 1（CurrentOnly）：只收当前屏幕上的窗口。目标屏幕或窗口所在屏幕取不到时
+    // 不过滤 —— 宁可多显示，也别因为一次取不到句柄就把列表清空
+    const bool currentOnly = (cfg.getMonitorSwitchMode() == MonitorSwitchMode::CurrentOnly);
+    const HMONITOR targetMonitor = currentOnly ? Util::screenHandle(targetScreen()) : nullptr;
     const auto list = Util::listValidWindows();
     for (auto hwnd: list) {
         if (hwnd == this->hWnd()) continue; // skip self
+        if (currentOnly && targetMonitor && Util::monitorOfWindow(hwnd) != targetMonitor) continue;
         auto path = Util::getWindowProcessPath(hwnd);
         if (path.isEmpty()) continue; // TODO 可能需要管理员权限
         auto& winGroup = winGroupMap[path];
@@ -568,10 +573,17 @@ void Widget::onNewWindows(const QList<HWND>& added) {
     // 于是下面这个分支成了死代码（本 Task 的顺序陷阱）
     if (!this->isVisible()) return;
 
+    // 多屏选项 1（CurrentOnly）：动态入列同样只收当前屏幕的窗口，
+    // 否则列表刚过滤完，新窗口又会从别的屏幕漏进来
+    const bool currentOnly = (cfg.getMonitorSwitchMode() == MonitorSwitchMode::CurrentOnly);
+    const HMONITOR targetMonitor = currentOnly ? Util::screenHandle(targetScreen()) : nullptr;
+
     if (mode_ == Mode::GroupMode) {
         // 只关心本进程（本组）的新窗口，别的程序的窗口不进组列表
         int lastInserted = -1;
         for (auto hwnd: added) {
+            if (currentOnly && targetMonitor && Util::monitorOfWindow(hwnd) != targetMonitor)
+                continue;
             if (Util::getWindowProcessPath(hwnd).compare(currentGroupExePath_, Qt::CaseInsensitive) != 0)
                 continue;
             // 插到列表末尾：新窗口没有使用记录，按最后使用时间降序它排最后
@@ -592,6 +604,8 @@ void Widget::onNewWindows(const QList<HWND>& added) {
 
     QList<QListWidgetItem*> newlyAdded;
     for (auto hwnd: added) {
+        if (currentOnly && targetMonitor && Util::monitorOfWindow(hwnd) != targetMonitor)
+            continue;
         auto path = Util::getWindowProcessPath(hwnd);   // 只为新窗口查，慢操作
         if (path.isEmpty()) continue;
 
@@ -708,8 +722,14 @@ void Widget::onWindowsGone(const QList<HWND>& removed) {
 /// 该进程的窗口，按最后使用时间降序（复用 Task 5 抽出的排序）
 QList<WindowInfo> Widget::orderedGroupWindows(const QString& exePath) {
     QList<WindowInfo> result;
-    for (auto hwnd: winActiveOrder_.orderedWindowsOf(exePath))
+    // 多屏选项 1（CurrentOnly）：组列表里也只看当前屏幕的窗口；
+    // 过滤后为空时 enterGroupMode() 会按既有逻辑返回 false（不弹空列表）
+    const bool currentOnly = (cfg.getMonitorSwitchMode() == MonitorSwitchMode::CurrentOnly);
+    const HMONITOR targetMonitor = currentOnly ? Util::screenHandle(targetScreen()) : nullptr;
+    for (auto hwnd: winActiveOrder_.orderedWindowsOf(exePath)) {
+        if (currentOnly && targetMonitor && Util::monitorOfWindow(hwnd) != targetMonitor) continue;
         result.append({Util::getWindowTitle(hwnd), Util::getClassName(hwnd), hwnd});
+    }
     return result;
 }
 
