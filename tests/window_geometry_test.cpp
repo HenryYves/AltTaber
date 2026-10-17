@@ -120,6 +120,58 @@ static int main_impl() {
     checkRect(thumbnailRect(Rect{0, 0, 800, 600}, 320, 180, 12, 800, 600),
               480, 210, 320, 180, "thumbnail: full-width list still keeps thumbnail inside");
 
+    // ---- 边界补齐（s01-f：关闭 s01-r.findings.md 1/3/4）----
+    // 25. 缩略图宽为 0：位置仍按列表右缘 + 间距计算
+    checkRect(thumbnailRect(Rect{100, 100, 400, 300}, 0, 180, 12, 1000, 600),
+              512, 160, 0, 180, "thumbnail: zero thumb width keeps anchor position");
+    // 26. 缩略图宽高为负：按 0 处理
+    checkRect(thumbnailRect(Rect{100, 100, 400, 300}, -50, -10, 12, 1000, 600),
+              512, 250, 0, 0, "thumbnail: negative thumb dims collapse to zero");
+    // 27. gap 远超客户区宽：钳到右缘
+    checkRect(thumbnailRect(Rect{100, 100, 400, 300}, 320, 180, 5000, 1000, 600),
+              680, 160, 320, 180, "thumbnail: oversized gap clamps to right edge");
+    // 28. 列表贴客户区右缘：缩略图被压回右下，与列表重叠（当前契约，s07 再定）
+    checkRect(thumbnailRect(Rect{700, 100, 300, 300}, 320, 180, 12, 1000, 600),
+              680, 160, 320, 180, "thumbnail: list flush right pins thumb to right edge (overlap)");
+
+    // ---- 边界补齐（s01-f：关闭 s01-r.findings.md 2）----
+    // 29. 列表宽为负：按 Rect 契约当 0 处理，不把 x 带偏
+    checkRect(thumbnailRect(Rect{100, 100, -50, 300}, 320, 180, 12, 1000, 600),
+              112, 160, 320, 180, "thumbnail: negative list width treated as zero");
+    // 30. 列表高为负：按 0 处理，垂直居中于列表原点
+    checkRect(thumbnailRect(Rect{100, 100, 400, -100}, 320, 180, 12, 1000, 600),
+              512, 10, 320, 180, "thumbnail: negative list height treated as zero");
+
+    // ---- 边界补齐（s01-f：关闭 s01-r.findings.md 5/6）----
+    // 31. 副屏在主屏左侧（负原点）仍相对工作区居中
+    checkRect(centerInWorkArea(400, 300, Rect{-1920, 0, 1920, 1080}),
+              -1160, 390, 400, 300, "center: negative-origin work area on the left");
+    // 32. 副屏在主屏上方（负 y 原点）
+    checkRect(centerInWorkArea(400, 300, Rect{0, -1080, 1920, 1080}),
+              760, -690, 400, 300, "center: negative-origin work area above primary");
+    // 33. 负尺寸窗口：按 0 处理，落在工作区中心
+    checkRect(centerInWorkArea(-400, -300, Rect{0, 0, 1920, 1080}),
+              960, 540, 0, 0, "center: negative window dims collapse to zero");
+
+    // ---- 边界补齐（s01-f：关闭 s01-r.findings.md 7）----
+    // 34. 宽度受限的向下取整：999 * 333 / 1000 = 332
+    checkRect(fitAspect(1000, 999, 333, 333), 0, 0, 333, 332,
+              "fitAspect: width-limited floors the height");
+    // 35. 64 位交叉相乘：7000*1000000 = 7e9 溢出 32 位；若退回 32 位会误判为高度受限
+    checkRect(fitAspect(7000, 1080, 1000, 1000000), 0, 0, 1000, 154,
+              "fitAspect: 64-bit cross product avoids 32-bit overflow");
+
+    // ---- 边界补齐（s01-f：关闭 s01-r.findings.md 8）----
+    // 36. 4K 物理像素 + 150% 缩放后的量级（3840x2160 工作区）
+    checkRect(centerInWorkArea(3000, 1800, Rect{0, 0, 3840, 2160}),
+              420, 180, 3000, 1800, "center: 4K physical work area");
+    // 37. 4K 副屏位于主屏左侧的负坐标
+    checkRect(centerInWorkArea(400, 300, Rect{-3840, 0, 3840, 2160}),
+              -2120, 930, 400, 300, "center: 4K work area with negative origin");
+    // 38. 4K 客户区里的缩略图钳位
+    checkRect(thumbnailRect(Rect{2800, 600, 800, 900}, 1920, 1080, 24, 3840, 2160),
+              1920, 510, 1920, 1080, "thumbnail: 4K client clamps oversized thumbnail");
+
     return g_failed == 0 ? 0 : 1;
 }
 

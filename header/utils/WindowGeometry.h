@@ -69,15 +69,18 @@ inline Rect fitAspect(int srcW, int srcH, int maxW, int maxH) {
 /// 把 thumbW×thumbH 的缩略图放在 listRect 右侧（间隔 gap）、相对列表垂直居中，
 /// 并钳位在 clientW×clientH 的客户区内。缩略图比客户区还大时贴左上角。
 /// 返回矩形只包含缩略图本身的尺寸，不含列表。
+/// listRect 的宽高为负时按 0 处理（与 Rect 的契约一致），否则返回值会被带偏。
 inline Rect thumbnailRect(const Rect& listRect, int thumbW, int thumbH, int gap,
                           int clientW, int clientH) {
     const int tw = std::max(0, thumbW);
     const int th = std::max(0, thumbH);
     const int cw = std::max(0, clientW);
     const int ch = std::max(0, clientH);
+    const int lw = std::max(0, listRect.width);
+    const int lh = std::max(0, listRect.height);
 
-    int x = listRect.x + listRect.width + gap;
-    int y = listRect.y + (listRect.height - th) / 2;
+    int x = listRect.x + lw + gap;
+    int y = listRect.y + (lh - th) / 2;
 
     // 水平钳位：先处理「比客户区还宽」，否则夹到 [0, cw - tw]
     if (tw > cw)
