@@ -10,6 +10,7 @@
 #include "utils/WindowInfo.h"
 #include "utils/GroupWindowList.h"
 #include "utils/WindowWatcher.h"
+#include "utils/DwmThumbnail.h"
 
 struct WindowGroup;
 
@@ -34,6 +35,8 @@ namespace Ui {
 }
 
 QT_END_NAMESPACE
+
+class QTimer;
 
 class Widget : public QWidget {
     Q_OBJECT
@@ -101,10 +104,26 @@ private:
     /// 与入口 B 的"按 ` 再松手 == 什么都不做"成对
     void exitGroupModeToApp();
 
+    /// 缩略图宿主与 DWM 封装：构造时创建一次。宿主是独立顶层窗口
+    /// （Qt::Tool + 无边框 + 置顶 + 不抢焦点 + 输入穿透 + 半透明背景），
+    /// 因为 DWM 的窗口圆角只能作用于整个顶层窗口，主弹窗无法只圆缩略图那一块
+    void setupThumbnail();
+    /// 高亮/内容变化后重置 60ms 单次定时器：只处理最后一次，不阻塞按键路径
+    void scheduleThumbnailUpdate();
+    /// 定时器到点：按当前高亮行注册/更新缩略图并定位宿主；不满足条件则隐藏
+    void updateThumbnail();
+    /// 停掉待处理定时器并隐藏缩略图与宿主（保留 DWM 注册，下次可直接复用）
+    void hideThumbnail();
+    /// 宿主圆角：优先 DWMWCP_ROUND，失败（Win10）回退 SetWindowRgn 圆角区域
+    void applyThumbnailHostRegion();
+
     /// `lw` 的宽度公式（项数 × 栅格宽 + 修正）。只此一处：
     /// 列表是 IconMode + 不换行 + 无滚动条，宽度必须正好等于内容宽，
     /// 所以 prepareListWidget() 与动态入列/移除三条路径都要调它
     void updateListWidth();
+    /// 缩略图预留盒的实际尺寸（逻辑像素）：配置值再被屏幕可用区域兜一次，
+    /// 保证「列表 + 间距 + 缩略图」不会超出屏幕（layout 与定时器共用同一份）
+    QSize thumbnailBoxSize();
     /// 轮询发现的新窗口：AppMode 下并入同进程的组，或为新进程插入一项
     void onNewWindows(const QList<HWND>& added);
     /// 轮询发现的已消失窗口：移除窗口已全部关闭的组
@@ -130,6 +149,16 @@ private:
     Mode mode_ = Mode::AppMode;
     GroupWindowList* groupList_ = nullptr;   // 在构造函数里 new，parent 为 this
     WindowWatcher* watcher_ = nullptr;       // 同上；只在列表可见时运行
+    /// 组列表右侧的 DWM 缩略图（[group_list] thumbnail=true 时生效）：
+    /// host 是独立顶层窗口（parent 为 Widget，即 owner），缩略图由 DWM 合成到它上面。
+    /// 宿主尺寸/位置一律用物理像素经 SetWindowPos 设置（见 f3）。
+    QWidget* thumbnailHost_ = nullptr;
+    DwmThumbnail* thumbnail_ = nullptr;      // 析构时显式 delete：必须先注销再让 Qt 销毁宿主
+    QTimer* thumbnailTimer_ = nullptr;       // 60ms 单次合并定时器
+    static constexpr int ThumbnailGap = 12;  // 列表与缩略图之间的间距（逻辑像素）
+    /// 宿主圆角是否走通了 Win11 的原生 API；没走通则每次改尺寸后重设圆角区域
+    bool thumbnailNativeCorner_ = false;
+    bool thumbnailCornerTried_ = false;
     /// 本次弹出钉住的屏幕（见 targetScreen()）：动态入列会重跑几何，
     /// 若每次都按光标重新选屏，跟随鼠标模式下弹窗会在中途跳到另一个显示器。
     /// 每次弹出开始时清空、hideEvent 再清一次。

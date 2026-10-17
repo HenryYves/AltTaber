@@ -16,6 +16,7 @@
 #include <QMetaEnum>
 #include "utils/SystemTray.h"
 #include "utils/ConfigManager.h"
+#include "utils/WindowGeometry.h"
 
 /// 从 WindowGroup 里取出 hwnd 列表，顺序与 group.windows 一致
 static QList<HWND> hwndsOfGroup(const WindowGroup& group) {
@@ -104,6 +105,7 @@ Widget::Widget(QWidget* parent) : QWidget(parent), ui(new Ui::Widget) {
     groupList_->widget()->installEventFilter(this);
     groupList_->widget()->viewport()->installEventFilter(this);
     setupGroupListFont();   // [group_list] 的字号/字体；与 setupLabelFont 同款，配置编辑后重应用
+    setupThumbnail();       // [group_list] thumbnail=true 时右侧的 DWM 实时预览（宿主 + 60ms 合并定时器）
 
     watcher_ = new WindowWatcher(this);
     connect(watcher_, &WindowWatcher::newWindowsFound, this, &Widget::onNewWindows);
@@ -112,6 +114,9 @@ Widget::Widget(QWidget* parent) : QWidget(parent), ui(new Ui::Widget) {
 }
 
 Widget::~Widget() {
+    // 先注销 DWM 缩略图，再让 Qt 销毁宿主窗口：反过来会对已销毁的 HWND 调 DwmUnregisterThumbnail
+    delete thumbnail_;
+    thumbnail_ = nullptr;
     delete ui;
 }
 
@@ -473,26 +478,47 @@ QScreen* Widget::targetScreen() {
 
 /// 本程序唯一的窗口几何计算处：按当前 mode_ 决定内容尺寸，再把窗口居中到目标屏幕
 bool Widget::layoutForCurrentMode() {
-    QWidget* content = nullptr;
+    QSize contentSize;
     if (mode_ == Mode::AppMode) {
+        hideThumbnail();   // 缩略图只在 GroupMode 出现；AppMode 下强制隐藏
         groupList_->widget()->hide();
         lw->show();
         ui->label->show();
-        content = lw;   // 宽度由 updateListWidth() 设好（prepareListWidget / onNewWindows / onWindowsGone）
+        contentSize = lw->size();   // 宽度由 updateListWidth() 设好（prepareListWidget / onNewWindows / onWindowsGone）
     } else {
         lw->hide();
         ui->label->hide();
         auto* view = groupList_->widget();
+        const bool thumbOn = cfg.getGroupThumbnailEnabled();
+        const QSize thumbBox = thumbOn ? thumbnailBoxSize() : QSize();
+        const int thumbBoxW = thumbBox.width();
+        const int thumbBoxH = thumbBox.height();
         // 字号放大后宽度上限跟着放宽（GroupWindowList::effectiveMaxWidth），但不能超出屏幕：
         // 下面只做居中、没有任何地方兜宽度，超宽会被裁在屏幕两侧。
-        // 必须在 preferredSize() 之前设：setWidthCap() 会顺带重排每一行的 sizeHint
+        // 必须在 preferredSize() 之前设：setWidthCap() 会顺带重排每一行的 sizeHint。
+        // 缩略图开启时，屏幕兜底还要扣掉缩略图盒与间距，否则「列表 + 缩略图」整体会超出屏幕
         if (auto* screen = targetScreen()) {
             const auto avail = screen->availableGeometry().width();
-            groupList_->setWidthCap(avail - ListWidgetMargin.left() - ListWidgetMargin.right());
+            int cap = avail - ListWidgetMargin.left() - ListWidgetMargin.right();
+            if (thumbOn) cap -= thumbBoxW + ThumbnailGap;
+            groupList_->setWidthCap(qMax(GroupWindowList::MinWidth, cap));
         }
-        view->setFixedSize(groupList_->preferredSize());
+        const QSize listSize = groupList_->preferredSize();
+        view->setFixedSize(listSize);
         view->show();
-        content = view;
+        // 内容区 = 列表 + 间距 + 缩略图盒；高度取两者较大值，列表与缩略图各自垂直居中。
+        // 预留的是**配置的上限盒**而不是当前源的等比尺寸：弹窗宽度不该随高亮移动而变化
+        contentSize = thumbOn
+                      ? QSize(listSize.width() + ThumbnailGap + thumbBoxW, qMax(listSize.height(), thumbBoxH))
+                      : listSize;
+        if (thumbOn) {
+            // 弹窗位置/尺寸变了：先把宿主藏起来（保留 DWM 注册），等 60ms 合并定时器
+            // 重新定位并显示，免得它停在旧位置当幽灵 —— 「组列表先出现，缩略图随后填入」
+            if (thumbnailHost_) thumbnailHost_->hide();
+            scheduleThumbnailUpdate();
+        } else {
+            hideThumbnail();
+        }
     }
 
     auto* screen = targetScreen();
@@ -508,7 +534,7 @@ bool Widget::layoutForCurrentMode() {
     //      size显示不正确不能忍，遂改用WinAPI
     //endregion
     qDebug() << "Screen:" << screen->name();
-    auto contentRect = QRect(QPoint(0, 0), content->size());
+    auto contentRect = QRect(QPoint(0, 0), contentSize);
     auto thisRect = contentRect.marginsAdded(ListWidgetMargin);
     thisRect.moveCenter(screen->geometry().center());
     this->setGeometry(thisRect);
@@ -527,8 +553,185 @@ bool Widget::layoutForCurrentMode() {
     //endregion
 
     contentRect.moveCenter(this->rect().center()); // local pos
-    content->move(contentRect.topLeft());
+    if (mode_ == Mode::GroupMode) {
+        // 列表在内容区里垂直居中（缩略图由定时器另行定位到右侧）
+        auto* view = groupList_->widget();
+        view->move(contentRect.topLeft() + QPoint(0, (contentRect.height() - view->height()) / 2));
+    } else {
+        lw->move(contentRect.topLeft());
+    }
     return true;
+}
+
+/// 缩略图预留盒的实际尺寸（逻辑像素）：配置值（默认 320×180，已钳在 80..2000 / 60..2000），
+/// 再被屏幕可用区域兜一次 —— 配置得再大，也不能让「列表 + 间距 + 缩略图」超出屏幕被裁掉
+QSize Widget::thumbnailBoxSize() {
+    int w = cfg.getGroupThumbnailWidth();
+    int h = cfg.getGroupThumbnailHeight();
+    if (auto* screen = targetScreen()) {
+        const QSize avail = screen->availableGeometry().size();
+        const int maxW = avail.width() - ListWidgetMargin.left() - ListWidgetMargin.right()
+                         - ThumbnailGap - GroupWindowList::MinWidth;
+        const int maxH = avail.height() - ListWidgetMargin.top() - ListWidgetMargin.bottom();
+        w = qMin(w, qMax(80, maxW));
+        h = qMin(h, qMax(60, maxH));
+    }
+    return {w, h};
+}
+
+/// 组列表右侧的 DWM 缩略图：宿主 + 封装 + 合并定时器，构造时创建一次。
+/// 宿主是**独立顶层窗口**（owner = 主弹窗）：DWM 的窗口圆角只能裁整个顶层窗口，
+/// 主弹窗是整窗圆角，没法只圆缩略图那一块。置顶、不抢焦点、输入穿透、半透明背景 ——
+/// 内容完全由 DWM 在宿主上合成，Qt 不画任何东西
+void Widget::setupThumbnail() {
+    thumbnailHost_ = new QWidget(this);
+    thumbnailHost_->setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
+                                   Qt::WindowDoesNotAcceptFocus | Qt::WindowTransparentForInput);
+    thumbnailHost_->setAttribute(Qt::WA_TranslucentBackground);
+    thumbnailHost_->setAttribute(Qt::WA_ShowWithoutActivating);
+    thumbnailHost_->hide();
+    // 立即创建原生窗口：DwmThumbnail 构造需要宿主 HWND。
+    // 没有标题、且 Qt::Tool 带 WS_EX_TOOLWINDOW，不会被 listValidWindows()/WindowWatcher
+    // 当成应用窗口收进切换器
+    thumbnail_ = new DwmThumbnail(reinterpret_cast<HWND>(thumbnailHost_->winId()));
+
+    thumbnailTimer_ = new QTimer(this);
+    thumbnailTimer_->setSingleShot(true);
+    thumbnailTimer_->setInterval(60);   // 切换优先、缩略图延迟：高亮连按只处理最后一次
+    connect(thumbnailTimer_, &QTimer::timeout, this, &Widget::updateThumbnail);
+
+    // 高亮变化（键盘 / 滚轮 / 鼠标点击 / 自动选中）一律走同一条合并路径
+    connect(groupList_->widget(), &QListWidget::currentItemChanged, this, [this] {
+        scheduleThumbnailUpdate();
+    });
+    // 配置编辑：开关 / 宽高变化后重新布局（重算内容宽度并重新调度缩略图）
+    connect(&cfg, &ConfigManager::configEdited, this, [this] {
+        if (mode_ == Mode::GroupMode && this->isVisible())
+            layoutForCurrentMode();
+        else
+            hideThumbnail();
+    });
+}
+
+void Widget::scheduleThumbnailUpdate() {
+    if (!thumbnailTimer_) return;
+    if (mode_ != Mode::GroupMode || !cfg.getGroupThumbnailEnabled()) {
+        hideThumbnail();
+        return;
+    }
+    thumbnailTimer_->start();   // 已在跑就重启：只处理最后一次高亮变化
+}
+
+void Widget::hideThumbnail() {
+    if (thumbnailTimer_) thumbnailTimer_->stop();
+    if (thumbnail_) thumbnail_->hide();     // 只关可见、保留注册，下次可直接复用
+    if (thumbnailHost_ && thumbnailHost_->isVisible()) thumbnailHost_->hide();
+}
+
+void Widget::updateThumbnail() {
+    if (!thumbnail_ || !thumbnailHost_) return;
+    if (mode_ != Mode::GroupMode || !this->isVisible() || !cfg.getGroupThumbnailEnabled()) {
+        hideThumbnail();
+        return;
+    }
+
+    const HWND source = groupList_->currentHwnd();
+    // 最小化 / cloaked 的源窗口 DWM 没有可靠内容，宁可隐藏
+    if (!source || IsIconic(source) || Util::isWindowCloaked(source)) {
+        hideThumbnail();
+        return;
+    }
+
+    // 等比缩放用**客户区**尺寸（与 DwmThumbnail 的 fSourceClientAreaOnly=TRUE 对齐）。
+    // 应用自绘的标题栏会留在客户区里 —— 这是「客户区」的边界，不是 DWM 的边框
+    RECT sourceClient{};
+    if (!GetClientRect(source, &sourceClient) ||
+        sourceClient.right <= sourceClient.left || sourceClient.bottom <= sourceClient.top) {
+        hideThumbnail();
+        return;
+    }
+    const QSize box = thumbnailBoxSize();
+    const auto fitted = WindowGeometry::fitAspect(sourceClient.right - sourceClient.left,
+                                                  sourceClient.bottom - sourceClient.top,
+                                                  box.width(), box.height());
+    if (fitted.width <= 0 || fitted.height <= 0) {
+        hideThumbnail();
+        return;
+    }
+
+    // 与 layoutForCurrentMode() 同一套内容尺寸：列表宽 + 间距 + 预留盒宽，高度取较大值。
+    // 缩略图在预留盒里水平居中、相对内容区垂直居中。gap 传 0：
+    // 间距与盒内居中偏移都已经算进 listRect 的宽度里
+    const QSize listSize = groupList_->preferredSize();
+    const QSize contentSize(listSize.width() + ThumbnailGap + box.width(),
+                            qMax(listSize.height(), box.height()));
+    const WindowGeometry::Rect listRect{
+        0, 0, listSize.width() + ThumbnailGap + (box.width() - fitted.width) / 2, contentSize.height()};
+    const auto thumbRect = WindowGeometry::thumbnailRect(listRect, fitted.width, fitted.height, 0,
+                                                         contentSize.width(), contentSize.height());
+
+    // 内容区在弹窗里的本地原点（layoutForCurrentMode() 把它居中），再换算到全局逻辑坐标
+    const QPoint contentTopLeft((this->width() - contentSize.width()) / 2,
+                                (this->height() - contentSize.height()) / 2);
+    const QPoint globalLogical = mapToGlobal(contentTopLeft + QPoint(thumbRect.x, thumbRect.y));
+
+    // DWM 目的地与 Win32 窗口坐标都是**物理像素**（f3）：逻辑坐标 × devicePixelRatioF()
+    const qreal dpr = this->devicePixelRatioF();
+    const int physX = qRound(globalLogical.x() * dpr);
+    const int physY = qRound(globalLogical.y() * dpr);
+    const int physW = qRound(thumbRect.width * dpr);
+    const int physH = qRound(thumbRect.height * dpr);
+    if (physW <= 0 || physH <= 0) {
+        hideThumbnail();
+        return;
+    }
+
+    // 先给 Qt 一份正确的逻辑几何（首次 show 时不会闪到屏幕别处），再用 SetWindowPos 落物理坐标。
+    // 宿主从不接收输入/焦点（WA_ShowWithoutActivating + WindowDoesNotAcceptFocus + 输入穿透）
+    thumbnailHost_->setGeometry(QRect(globalLogical, QSize(thumbRect.width, thumbRect.height)));
+    if (!thumbnailHost_->isVisible()) thumbnailHost_->show();
+
+    const HWND hostHwnd = reinterpret_cast<HWND>(thumbnailHost_->winId());
+    // SWP_NOACTIVATE：摆缩略图不能把焦点从用户正在切换的应用手里抢走
+    SetWindowPos(hostHwnd, HWND_TOPMOST, physX, physY, physW, physH, SWP_NOACTIVATE);
+    applyThumbnailHostRegion();
+
+    // 源 hwnd 未变则跳过注册（setSource() 自己也会短路，这里省掉一次调用）
+    if (thumbnail_->source() != source) {
+        if (!thumbnail_->setSource(source)) {
+            hideThumbnail();   // 注册失败只静默降级为不显示，不影响窗口切换
+            return;
+        }
+    }
+
+    // 宿主客户区就是预览区：物理像素矩形直接交给 DWM
+    RECT hostClient{};
+    if (!GetClientRect(hostHwnd, &hostClient)) {
+        hideThumbnail();
+        return;
+    }
+    const RECT destination{0, 0, hostClient.right, hostClient.bottom};
+    thumbnail_->setDestinationRect(destination);
+}
+
+void Widget::applyThumbnailHostRegion() {
+    if (!thumbnailHost_) return;
+    const HWND hwnd = reinterpret_cast<HWND>(thumbnailHost_->winId());
+
+    if (!thumbnailCornerTried_) {
+        thumbnailCornerTried_ = true;
+        thumbnailNativeCorner_ = Util::setWindowRoundCorner(hwnd);
+        if (!thumbnailNativeCorner_)
+            qWarning() << "DWM round corner unavailable, fallback to SetWindowRgn";
+    }
+    if (thumbnailNativeCorner_) return;   // Win11：DWM 圆角随窗口尺寸自动生效
+
+    // Win10 回退：窗口区域圆角；SetWindowRgn 成功后区域归系统所有，失败要自己删
+    RECT client{};
+    if (!GetClientRect(hwnd, &client) || client.right <= 0 || client.bottom <= 0) return;
+    const HRGN region = CreateRoundRectRgn(0, 0, client.right + 1, client.bottom + 1, 16, 16);
+    if (region && !SetWindowRgn(hwnd, region, TRUE))
+        DeleteObject(region);
 }
 
 bool Widget::requestShow() { // TODO 当前台是开始菜单（Win）时，会导致显示 但无法操控
@@ -570,6 +773,7 @@ bool Widget::requestShow() { // TODO 当前台是开始菜单（Win）时，会�
 void Widget::hideEvent(QHideEvent* event) {
     watcher_->stop();
     pinnedScreen_ = nullptr;   // 本次弹出结束，屏幕钉扎作废
+    hideThumbnail();           // 停掉待处理定时器并隐藏缩略图与宿主（DWM 注册保留）
     QWidget::hideEvent(event);
 }
 
