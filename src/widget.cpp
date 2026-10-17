@@ -291,6 +291,12 @@ void Widget::keyReleaseEvent(QKeyEvent* event) {
                         }
                     }
                     if (targetWin.hwnd) {
+                        // 多屏选项 2（AllMoveToCurrent）：先搬到当前屏幕再切过去。
+                        // 目标屏幕取不到时不动窗口，至少别把切换本身也弄丢
+                        if (cfg.getMonitorSwitchMode() == MonitorSwitchMode::AllMoveToCurrent) {
+                            if (auto* screen = targetScreen())
+                                Util::moveWindowToMonitor(targetWin.hwnd, Util::screenHandle(screen));
+                        }
                         Util::switchToWindow(targetWin.hwnd);
                         qInfo() << "Switch to" << targetWin << group.exePath;
                     }
@@ -829,6 +835,11 @@ bool Widget::requestShowGroup() {
 /// Alt 抬起时，GroupMode 的提交动作
 void Widget::commitGroupSelection() {
     if (auto hwnd = groupList_->currentHwnd()) {
+        // 与 AppMode 松手分支一致：AllMoveToCurrent 时先搬到当前屏幕
+        if (cfg.getMonitorSwitchMode() == MonitorSwitchMode::AllMoveToCurrent) {
+            if (auto* screen = targetScreen())
+                Util::moveWindowToMonitor(hwnd, Util::screenHandle(screen));
+        }
         Util::switchToWindow(hwnd);
         qInfo() << "(Alt+`)Switch to" << Util::getWindowTitle(hwnd) << Util::getClassName(hwnd);
     }

@@ -1,5 +1,11 @@
-﻿#include <QList>
+﻿// WindowGeometry.h 用的是 std::max/std::clamp；不屏蔽 windows.h 的同名宏会把它们撕坏
+// （与 WindowDiffTracker.h 的做法一致）
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <QList>
 #include "utils/Util.h"
+#include "utils/WindowGeometry.h"
 #include <appmodel.h>
 #include "utils/AppUtil.h"
 #include "utils/ConfigManager.h"
@@ -608,5 +614,45 @@ namespace Util {
 
     HMONITOR monitorOfWindow(HWND hwnd) {
         return MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    }
+
+    void moveWindowToMonitor(HWND hwnd, HMONITOR target) {
+        if (!hwnd || !target || !IsWindow(hwnd)) return;
+        if (monitorOfWindow(hwnd) == target) return; // 已在目标屏幕，不动
+
+        MONITORINFO mi{};
+        mi.cbSize = sizeof(mi);
+        if (!GetMonitorInfoW(target, &mi)) return;
+        const RECT& work = mi.rcWork;
+
+        // 最小化 / 最大化窗口的窗口矩形不是用户看到的位置（最小化时甚至是负的哨兵值），
+        // 先还原再取几何。最大化会在移动后恢复。
+        if (IsIconic(hwnd))
+            ShowWindow(hwnd, SW_RESTORE);
+        const bool wasMaximized = IsZoomed(hwnd);
+        if (wasMaximized)
+            ShowWindow(hwnd, SW_RESTORE);
+
+        // DWMWA_EXTENDED_FRAME_BOUNDS 是可见外框；SetWindowPos 定位的是窗口矩形，
+        // 两者在 Win10+ 差着一圈不可见的调整边框，用偏移换算，保证"看到的外框"落点正确
+        RECT frame{};
+        if (FAILED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame)))) {
+            if (!GetWindowRect(hwnd, &frame)) return;
+        }
+        RECT windowRect{};
+        if (!GetWindowRect(hwnd, &windowRect)) return;
+
+        const int frameW = frame.right - frame.left;
+        const int frameH = frame.bottom - frame.top;
+        const auto targetRect = WindowGeometry::centerInWorkArea(
+                frameW, frameH, WindowGeometry::Rect{work.left, work.top,
+                                                     work.right - work.left, work.bottom - work.top});
+
+        const int x = targetRect.x + (windowRect.left - frame.left);
+        const int y = targetRect.y + (windowRect.top - frame.top);
+        SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+        if (wasMaximized)
+            ShowWindow(hwnd, SW_MAXIMIZE);
     }
 } // Util
