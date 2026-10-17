@@ -1,6 +1,7 @@
 ﻿#include "../header/widget.h"
 #include "ui_Widget.h"
 #include "utils/Util.h"
+#include "utils/Diag.h"
 #include <QDebug>
 #include <QWindow>
 #include <QScreen>
@@ -54,6 +55,7 @@ Widget::Widget(QWidget* parent) : QWidget(parent), ui(new Ui::Widget) {
 
     Util::setWindowRoundCorner(this->hWnd()); // 设置窗口圆角
     setWindowBlur(hWnd()); // 设置窗口模糊, 必须配合Qt::WA_TranslucentBackground
+    Diag::setSelfHwnd(hWnd()); // 诊断日志的 selfVisible 字段用
 
     setupLabelFont();
 
@@ -302,6 +304,7 @@ void Widget::keyReleaseEvent(QKeyEvent* event) {
                             if (auto* screen = targetScreen())
                                 Util::moveWindowToMonitor(targetWin.hwnd, Util::screenHandle(screen));
                         }
+                        Diag::log("#SWITCH", targetWin.hwnd);
                         Util::switchToWindow(targetWin.hwnd);
                         qInfo() << "Switch to" << targetWin << group.exePath;
                     }
@@ -325,6 +328,7 @@ void Widget::paintEvent(QPaintEvent*) { //不绘制会导致鼠标穿透背景
 /// @param hwnd 前台窗口句柄
 /// @param source 通知来源, for debug, @b Optional
 void Widget::notifyForegroundChanged(HWND hwnd, ForegroundChangeSource source) { // TODO isVisible or AltDown时，关闭前台更新通知
+    Diag::log("#FG", hwnd);
     if (hwnd == this->hWnd()) return;
     // （其实监听前台变化只是为了排序，不需要太精确，可以放松限制）
     // 通过`EVENT_SYSTEM_FOREGROUND`触发时忽略`IsWindowVisible`，因为窗口在创建瞬间可能不可见
@@ -1044,6 +1048,7 @@ void Widget::commitGroupSelection() {
             if (auto* screen = targetScreen())
                 Util::moveWindowToMonitor(hwnd, Util::screenHandle(screen));
         }
+        Diag::log("#SWITCH", hwnd);
         Util::switchToWindow(hwnd);
         qInfo() << "(Alt+`)Switch to" << Util::getWindowTitle(hwnd) << Util::getClassName(hwnd);
     }
@@ -1245,10 +1250,13 @@ void Widget::rotateTaskbarWindowInGroup(const QString& exePath, bool forward, in
                 mouseEvent(MOUSEEVENTF_LEFTDOWN);
                 // 由于本程序hook了mouse，所以必须处理全局鼠标事件（in事件循环）
                 QTimer::singleShot(20, this, [hwnd]() {
+                    Diag::log("#SWITCH", hwnd);
                     Util::switchToWindow(hwnd, true); // TODO thumbnail隐藏之前 不要switch，并且block滚轮 防止闪烁卡顿
                 });
-            } else
+            } else {
+                Diag::log("#SWITCH", hwnd);
                 Util::switchToWindow(hwnd, true);
+            }
 
             static QTimer* timer = [this]() {
                 auto* timer = new QTimer;
@@ -1265,8 +1273,10 @@ void Widget::rotateTaskbarWindowInGroup(const QString& exePath, bool forward, in
                     QTimer::singleShot(100, this, []() {
                         // 等待thumbnail显示
                         if (HWND thumbnail = Util::getCurrentTaskListThumbnailWnd(); IsWindowVisible(thumbnail)) {
-                            if (HWND taskbar = FindWindow(L"Shell_TrayWnd", nullptr))
+                            if (HWND taskbar = FindWindow(L"Shell_TrayWnd", nullptr)) {
+                                Diag::log("#SWITCH", taskbar);
                                 Util::switchToWindow(taskbar, true);
+                            }
                         }
                     });
                 });

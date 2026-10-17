@@ -8,6 +8,7 @@
 #include "widget.h"
 #include "utils/winEventHook.h"
 #include "utils/Util.h"
+#include "utils/Diag.h"
 #include "utils/TaskbarWheelHooker.h"
 #include "utils/KeyboardHooker.h"
 #include "utils/ComInitializer.h"
@@ -65,6 +66,7 @@ int main(int argc, char* argv[]) {
             // 但是此时GetForegroundWindow()还是上个窗口，可能是更新不及时，所以 ^1-1 处的方案不可行
             // 问题不大，本程序hook了Alt+Tab，已经不会出现两次Event了
             winSwitcher->notifyForegroundChanged(hwnd, Widget::WinEvent);
+            Diag::log("#FG", hwnd);
             auto className = Util::getClassName(hwnd);
             // ForegroundStaging貌似是辅助过渡动画
             // 检测 Alt 按下，防止误判 Win+Tab (任务视图)
