@@ -14,6 +14,14 @@ enum DisplayMonitor {
     EnumCount // Just for count
 };
 
+/// 切换器显示时，其余屏幕的行为
+/// In config.ini: [monitor] \n switch_mode=0|1|2
+enum MonitorSwitchMode {
+    AllKeepPosition = 0, // 全部留在原屏幕
+    CurrentOnly = 1, // 只在当前屏幕显示
+    AllMoveToCurrent = 2 // 全部移动到当前屏幕
+};
+
 class ConfigManager : public ConfigManagerBase {
     inline static const QString FileName = "config.ini";
 
@@ -39,6 +47,16 @@ public:
 
     void setDisplayMonitor(DisplayMonitor monitor) {
         set("DisplayMonitor", monitor);
+    }
+
+    /// 多屏切换行为，越界值回退到 AllKeepPosition
+    MonitorSwitchMode getMonitorSwitchMode() {
+        auto mode = get("monitor/switch_mode", MonitorSwitchMode::AllKeepPosition).toInt();
+        if (mode < MonitorSwitchMode::AllKeepPosition || mode > MonitorSwitchMode::AllMoveToCurrent) {
+            qWarning() << "Invalid monitor/switch_mode enum" << mode;
+            mode = MonitorSwitchMode::AllKeepPosition;
+        }
+        return static_cast<MonitorSwitchMode>(mode);
     }
 
     /// When enabled, apps with no usage record are sorted to the second position

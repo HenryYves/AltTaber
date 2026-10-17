@@ -7,6 +7,8 @@
 #include <dwmapi.h>
 #include <QElapsedTimer>
 
+class QScreen;
+
 namespace Util {
     QString getWindowTitle(HWND hwnd);
     QString getClassName(HWND hwnd);
@@ -33,6 +35,10 @@ namespace Util {
     POINT getCursorPos();
     HWND getCurrentTaskListThumbnailWnd();
     bool isTaskbarWindow(HWND hwnd);
+    /// 获取 QScreen 对应的 Win32 屏幕句柄（HMONITOR）；取不到返回 nullptr
+    HMONITOR screenHandle(QScreen* screen);
+    /// 窗口所在（或最近）屏幕的 HMONITOR
+    HMONITOR monitorOfWindow(HWND hwnd);
 } // Util
 
 #endif //WIN_SWITCHER_UTIL_H

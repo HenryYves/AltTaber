@@ -12,6 +12,8 @@
 #include <ShObjIdl_core.h>
 #include <QDomDocument>
 #include <QPainter>
+#include <QScreen>
+#include <QtGui/qscreen_platform.h>
 #include <propkey.h>
 #include <atlbase.h>
 #include <minappmodel.h>
@@ -596,5 +598,15 @@ namespace Util {
     bool isTaskbarWindow(HWND hwnd) {
         auto className = Util::getClassName(hwnd);
         return className == QStringLiteral("Shell_TrayWnd") || className == QStringLiteral("Shell_SecondaryTrayWnd"); // 副屏
+    }
+
+    HMONITOR screenHandle(QScreen* screen) {
+        if (!screen) return nullptr;
+        auto* winScreen = screen->nativeInterface<QNativeInterface::QWindowsScreen>();
+        return winScreen ? winScreen->handle() : nullptr;
+    }
+
+    HMONITOR monitorOfWindow(HWND hwnd) {
+        return MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
     }
 } // Util
