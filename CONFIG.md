@@ -8,6 +8,10 @@
 
 ```ini
 DisplayMonitor=1
+
+[monitor]
+switch_mode=0
+
 [label]
 font_size=10
 font_family=Microsoft YaHei UI
@@ -40,6 +44,33 @@ Which screen the switcher appears on.
 | `DisplayMonitor` | int | `1` | `0` = primary monitor, `1` = follow mouse cursor |
 
 Can also be changed via tray icon → **Display Monitor**.
+
+---
+
+### `[monitor]` — Multi-monitor switching behavior
+
+What happens to windows on other screens when a window is picked in the switcher.
+
+| Key | Type | Default | Values |
+|-----|------|---------|--------|
+| `switch_mode` | int | `0` | `0` = show all windows and keep them where they are; `1` = show only windows on the current screen; `2` = show all windows and move the selected window to the current screen |
+
+```ini
+[monitor]
+switch_mode=0
+```
+
+**Current screen** means the screen this popup is rendered on — the screen `DisplayMonitor` resolves to when the switcher opens (primary monitor, or the monitor under the mouse cursor), pinned for the duration of that popup.
+
+- `0` (default) — every window is listed; switching never moves a window.
+- `1` — both the app list and the Alt+`` ` `` window list keep only windows located on the current screen. If a group has no window on the current screen, its window list does not open. New windows discovered while the switcher is open are also filtered by screen; a window that moves to another screen is picked up on the next popup.
+- `2` — every window is listed. When the selection is committed (releasing `Alt` in the app list, or picking in the Alt+`` ` `` window list), the target window is moved to the current screen first:
+  - the window keeps its **physical** size and is centered on the current screen's work area; if it is larger than the work area it is pinned to the work area's top-left corner instead of being shrunk;
+  - a maximized window is restored first, moved, then maximized again on the target screen;
+  - a window already on the current screen is left alone;
+  - moving between screens with different scale factors is left to Windows' native `WM_DPICHANGED` path — per-monitor DPI-aware apps re-lay out at the new DPI, other apps are bitmap-stretched by DWM. AltTaber does not pre-scale the window.
+
+The key is read whenever the switcher opens, so a saved change takes effect on the **next popup**; no restart is needed.
 
 ---
 
