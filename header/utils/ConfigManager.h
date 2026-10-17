@@ -59,6 +59,28 @@ public:
         return static_cast<MonitorSwitchMode>(mode);
     }
 
+    /// 组列表右侧的 DWM 实时缩略图预览，仅 GroupMode 生效。
+    /// In config.ini: [group_list] \n thumbnail=true
+    bool getGroupThumbnailEnabled() {
+        return get("group_list/thumbnail", false).toBool();
+    }
+
+    /// 缩略图预览盒宽度（逻辑像素），默认 320，钳位 80..2000。
+    /// In config.ini: [group_list] \n thumbnail_width=320
+    int getGroupThumbnailWidth() {
+        bool ok = false;
+        const int width = get("group_list/thumbnail_width", 320).toInt(&ok);
+        return qBound(80, ok ? width : 320, 2000);
+    }
+
+    /// 缩略图预览盒高度（逻辑像素），默认 180，钳位 60..2000。
+    /// In config.ini: [group_list] \n thumbnail_height=180
+    int getGroupThumbnailHeight() {
+        bool ok = false;
+        const int height = get("group_list/thumbnail_height", 180).toInt(&ok);
+        return qBound(60, ok ? height : 180, 2000);
+    }
+
     /// When enabled, apps with no usage record are sorted to the second position
     /// (right after the foreground window) instead of the end.
     /// In config.ini: [sorting] \n new_app_second=true

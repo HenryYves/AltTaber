@@ -50,6 +50,8 @@ add_executable(Win_Switcher src/main.cpp
         header/utils/Util.h
         header/utils/setWindowBlur.h
         src/utils/setWindowBlur.cpp
+        src/utils/DwmThumbnail.cpp
+        header/utils/DwmThumbnail.h
         src/utils/IconOnlyDelegate.cpp
         header/utils/IconOnlyDelegate.h
         header/utils/uiautomation.h
