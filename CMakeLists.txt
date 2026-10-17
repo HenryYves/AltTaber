@@ -119,3 +119,11 @@ set_target_properties(WindowDiffTests PROPERTIES
 if (MSVC)
     target_compile_options(WindowDiffTests PRIVATE "/utf-8")
 endif ()
+
+add_executable(WindowGeometryTests tests/window_geometry_test.cpp)
+set_target_properties(WindowGeometryTests PROPERTIES
+        AUTOMOC OFF AUTOUIC OFF AUTORCC OFF
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/$<CONFIG>")
+if (MSVC)
+    target_compile_options(WindowGeometryTests PRIVATE "/utf-8")
+endif ()
