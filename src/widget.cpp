@@ -601,7 +601,9 @@ QScreen* Widget::targetScreen() {
 /// 本程序唯一的窗口几何计算处：按当前 mode_ 决定内容尺寸，再把窗口居中到目标屏幕
 bool Widget::layoutForCurrentMode() {
     QSize contentSize;
+    QPoint groupListOffset{0, 0};
     if (mode_ == Mode::AppMode) {
+        thumbnailActive_ = false;
         hideThumbnail();   // 缩略图只在 GroupMode 出现；AppMode 下强制隐藏
         groupList_->widget()->hide();
         lw->show();
@@ -611,36 +613,36 @@ bool Widget::layoutForCurrentMode() {
         lw->hide();
         ui->label->hide();
         auto* view = groupList_->widget();
-        bool thumbOn = cfg.getGroupThumbnailEnabled();
-        const QSize thumbBox = thumbOn ? thumbnailBoxSize() : QSize();
-        const int thumbBoxW = thumbBox.width();
-        const int thumbBoxH = thumbBox.height();
+        bool thumbRequested = cfg.getGroupThumbnailEnabled();
+        const QSize thumbBox = thumbRequested ? thumbnailBoxSize() : QSize();
+        int availContentW = 0;
         // 字号放大后宽度上限跟着放宽（GroupWindowList::effectiveMaxWidth），但不能超出屏幕：
         // 下面只做居中、没有任何地方兜宽度，超宽会被裁在屏幕两侧。
         // 必须在 preferredSize() 之前设：setWidthCap() 会顺带重排每一行的 sizeHint。
         // 缩略图开启时，屏幕兜底还要扣掉缩略图盒与间距，否则「列表 + 缩略图」整体会超出屏幕
         if (auto* screen = targetScreen()) {
-            const auto avail = screen->availableGeometry().width();
-            const int availContentW = avail - ListWidgetMargin.left() - ListWidgetMargin.right();
+            availContentW = screen->availableGeometry().width()
+                            - ListWidgetMargin.left() - ListWidgetMargin.right();
             int cap = availContentW;
-            if (thumbOn) cap -= thumbBoxW + ThumbnailGap;
+            if (thumbRequested) cap -= thumbBox.width() + ThumbnailGap;
             groupList_->setWidthCap(qMax(GroupWindowList::MinWidth, cap));
-            // 屏幕窄到连「列表下限 + 间距 + 缩略图」都放不下时，整块隐藏缩略图；
-            // 绝不把缩略图钳到右缘压在列表上（用户 2026-10-18 的决策）
-            if (thumbOn && GroupWindowList::MinWidth + ThumbnailGap + thumbBoxW > availContentW) {
-                thumbOn = false;
-                qWarning() << "Thumbnail hidden: not enough horizontal room";
-            }
         }
         const QSize listSize = groupList_->preferredSize();
+        // 内容区 = 列表 + 间距 + 缩略图盒；高度取两者较大值，列表与缩略图各自垂直居中。
+        // 预留的是**配置的上限盒**而不是当前源的等比尺寸：弹窗宽度不该随高亮移动而变化。
+        // 屏幕窄到连「列表下限 + 间距 + 缩略图」都放不下时，整块隐藏缩略图；
+        // 绝不把缩略图钳到右缘压在列表上（用户 2026-10-18 的决策）
+        const auto group = WindowGeometry::groupContent(
+                listSize.width(), listSize.height(),
+                thumbBox.width(), thumbBox.height(),
+                ThumbnailGap, GroupWindowList::MinWidth,
+                availContentW, thumbRequested);
+        thumbnailActive_ = group.thumbnailActive;
+        groupListOffset = QPoint(group.listX, group.listY);
         view->setFixedSize(listSize);
         view->show();
-        // 内容区 = 列表 + 间距 + 缩略图盒；高度取两者较大值，列表与缩略图各自垂直居中。
-        // 预留的是**配置的上限盒**而不是当前源的等比尺寸：弹窗宽度不该随高亮移动而变化
-        contentSize = thumbOn
-                      ? QSize(listSize.width() + ThumbnailGap + thumbBoxW, qMax(listSize.height(), thumbBoxH))
-                      : listSize;
-        if (thumbOn) {
+        contentSize = QSize(group.contentWidth, group.contentHeight);
+        if (thumbnailActive_) {
             // 弹窗位置/尺寸变了：先把宿主藏起来（保留 DWM 注册），等 60ms 合并定时器
             // 重新定位并显示，免得它停在旧位置当幽灵 —— 「组列表先出现，缩略图随后填入」
             if (thumbnailHost_) thumbnailHost_->hide();
@@ -683,9 +685,9 @@ bool Widget::layoutForCurrentMode() {
 
     contentRect.moveCenter(this->rect().center()); // local pos
     if (mode_ == Mode::GroupMode) {
-        // 列表在内容区里垂直居中（缩略图由定时器另行定位到右侧）
+        // 列表按 groupContent() 算出的偏移落在内容区里（缩略图由定时器另行定位到右侧）
         auto* view = groupList_->widget();
-        view->move(contentRect.topLeft() + QPoint(0, (contentRect.height() - view->height()) / 2));
+        view->move(contentRect.topLeft() + groupListOffset);
     } else {
         lw->move(contentRect.topLeft());
     }
@@ -744,7 +746,7 @@ void Widget::setupThumbnail() {
 
 void Widget::scheduleThumbnailUpdate() {
     if (!thumbnailTimer_) return;
-    if (mode_ != Mode::GroupMode || !cfg.getGroupThumbnailEnabled()) {
+    if (mode_ != Mode::GroupMode || !cfg.getGroupThumbnailEnabled() || !thumbnailActive_) {
         hideThumbnail();
         return;
     }
@@ -759,7 +761,8 @@ void Widget::hideThumbnail() {
 
 void Widget::updateThumbnail() {
     if (!thumbnail_ || !thumbnailHost_) return;
-    if (mode_ != Mode::GroupMode || !this->isVisible() || !cfg.getGroupThumbnailEnabled()) {
+    if (mode_ != Mode::GroupMode || !this->isVisible()
+        || !cfg.getGroupThumbnailEnabled() || !thumbnailActive_) {
         hideThumbnail();
         return;
     }
@@ -789,20 +792,36 @@ void Widget::updateThumbnail() {
         return;
     }
 
-    // 与 layoutForCurrentMode() 同一套内容尺寸：列表宽 + 间距 + 预留盒宽，高度取较大值。
+    // 与 layoutForCurrentMode() 同一套内容尺寸，统一由 WindowGeometry::groupContent() 给出。
     // 缩略图在预留盒里水平居中、相对内容区垂直居中。gap 传 0：
     // 间距与盒内居中偏移都已经算进 listRect 的宽度里
     const QSize listSize = groupList_->preferredSize();
-    const QSize contentSize(listSize.width() + ThumbnailGap + box.width(),
-                            qMax(listSize.height(), box.height()));
+    int availContentW = 0;
+    if (auto* screen = targetScreen()) {
+        availContentW = screen->availableGeometry().width()
+                        - ListWidgetMargin.left() - ListWidgetMargin.right();
+    }
+    const auto group = WindowGeometry::groupContent(
+            listSize.width(), listSize.height(),
+            box.width(), box.height(),
+            ThumbnailGap, GroupWindowList::MinWidth,
+            availContentW, true);
+    if (!group.thumbnailActive) {
+        hideThumbnail();
+        return;
+    }
+
     const WindowGeometry::Rect listRect{
-        0, 0, listSize.width() + ThumbnailGap + (box.width() - fitted.width) / 2, contentSize.height()};
-    const auto thumbRect = WindowGeometry::thumbnailRect(listRect, fitted.width, fitted.height, 0,
-                                                         contentSize.width(), contentSize.height());
+        0, 0,
+        listSize.width() + ThumbnailGap + (box.width() - fitted.width) / 2,
+        group.contentHeight};
+    const auto thumbRect = WindowGeometry::thumbnailRect(
+        listRect, fitted.width, fitted.height, 0,
+        group.contentWidth, group.contentHeight);
 
     // 内容区在弹窗里的本地原点（layoutForCurrentMode() 把它居中），再换算到全局逻辑坐标
-    const QPoint contentTopLeft((this->width() - contentSize.width()) / 2,
-                                (this->height() - contentSize.height()) / 2);
+    const QPoint contentTopLeft((this->width() - group.contentWidth) / 2,
+                                (this->height() - group.contentHeight) / 2);
     const QPoint globalLogical = mapToGlobal(contentTopLeft + QPoint(thumbRect.x, thumbRect.y));
 
     // DWM 目的地与 Win32 窗口坐标都是**物理像素**（f3）。

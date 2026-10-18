@@ -169,6 +169,10 @@ private:
     QWidget* thumbnailHost_ = nullptr;
     DwmThumbnail* thumbnail_ = nullptr;      // 析构时显式 delete：必须先注销再让 Qt 销毁宿主
     QTimer* thumbnailTimer_ = nullptr;       // 60ms 单次合并定时器
+    /// 本次 GroupMode 弹窗是否真的启用了缩略图（布局按可用宽度算出来的结果）。
+    /// scheduleThumbnailUpdate()/updateThumbnail() 必须读它，不能只读配置，
+    /// 否则窄屏上布局先隐藏、换高亮又把缩略图放回来。
+    bool thumbnailActive_ = false;
     static constexpr int ThumbnailGap = 12;  // 列表与缩略图之间的间距（逻辑像素）
     /// 宿主圆角是否走通了 Win11 的原生 API；没走通则每次改尺寸后重设圆角区域
     bool thumbnailNativeCorner_ = false;

@@ -172,6 +172,32 @@ static int main_impl() {
     checkRect(thumbnailRect(Rect{2800, 600, 800, 900}, 1920, 1080, 24, 3840, 2160),
               1920, 510, 1920, 1080, "thumbnail: 4K client clamps oversized thumbnail");
 
+    // group content layout: one source of truth for the list and the thumbnail box
+    {
+        auto c = WindowGeometry::groupContent(300, 120, 320, 180, 12, 220, 1600, true);
+        check(c.thumbnailActive, "groupContent: enough room activates the thumbnail");
+        check(c.contentWidth == 300 + 12 + 320, "groupContent: content width includes gap and box");
+        check(c.contentHeight == 180, "groupContent: content height is the taller side");
+        check(c.listY == (180 - 120) / 2, "groupContent: list is vertically centered");
+    }
+    {
+        auto c = WindowGeometry::groupContent(300, 120, 320, 180, 12, 220, 300, true);
+        check(!c.thumbnailActive, "groupContent: narrow content hides the thumbnail");
+        check(c.contentWidth == 300, "groupContent: hidden thumbnail does not widen content");
+        check(c.contentHeight == 120, "groupContent: hidden thumbnail does not raise content");
+        check(c.listY == 0, "groupContent: list starts at zero when thumbnail is off");
+    }
+    {
+        auto c = WindowGeometry::groupContent(300, 400, 320, 180, 12, 220, 1600, false);
+        check(!c.thumbnailActive, "groupContent: disabled thumbnail stays inactive");
+        check(c.contentHeight == 400, "groupContent: list height wins when thumbnail is off");
+    }
+    {
+        auto c = WindowGeometry::groupContent(0, 0, 0, 0, 12, 220, 0, true);
+        check(!c.thumbnailActive, "groupContent: zero box cannot become active");
+        check(c.contentWidth == 0 && c.contentHeight == 0, "groupContent: zero inputs stay zero");
+    }
+
     return g_failed == 0 ? 0 : 1;
 }
 

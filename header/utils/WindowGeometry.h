@@ -66,6 +66,37 @@ inline Rect fitAspect(int srcW, int srcH, int maxW, int maxH) {
     return Rect{0, 0, outW, mh};
 }
 
+/// GroupMode 内容区的唯一几何来源：缩略图是否放得下、内容尺寸、列表在内容区里的偏移。
+/// 输入都是逻辑像素；`availableContentWidth` 已扣掉弹窗左右 margin。
+struct GroupContent {
+    int contentWidth = 0;
+    int contentHeight = 0;
+    int listX = 0;
+    int listY = 0;
+    bool thumbnailActive = false;
+};
+
+inline GroupContent groupContent(int listWidth, int listHeight,
+                                 int thumbBoxWidth, int thumbBoxHeight,
+                                 int gap, int minListWidth,
+                                 int availableContentWidth, bool thumbnailRequested) {
+    const int lw = std::max(0, listWidth);
+    const int lh = std::max(0, listHeight);
+    const int bw = std::max(0, thumbBoxWidth);
+    const int bh = std::max(0, thumbBoxHeight);
+    const int g = std::max(0, gap);
+    const int avail = std::max(0, availableContentWidth);
+    const bool active = thumbnailRequested && (std::max(0, minListWidth) + g + bw <= avail);
+
+    GroupContent out;
+    out.thumbnailActive = active;
+    out.contentWidth = active ? lw + g + bw : lw;
+    out.contentHeight = active ? std::max(lh, bh) : lh;
+    out.listX = 0;
+    out.listY = (out.contentHeight - lh) / 2;
+    return out;
+}
+
 /// 把 thumbW×thumbH 的缩略图放在 listRect 右侧（间隔 gap）、相对列表垂直居中，
 /// 并钳位在 clientW×clientH 的客户区内。缩略图比客户区还大时贴左上角。
 /// 返回矩形只包含缩略图本身的尺寸，不含列表。
