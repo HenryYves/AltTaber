@@ -34,8 +34,6 @@ public:
 
     void fill(const QList<WindowInfo>& windows);
     void clear();
-    int count() const;
-    int currentRow() const;
     void setCurrentRow(int row);
     void moveSelection(int delta);
     HWND currentHwnd() const;

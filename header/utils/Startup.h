@@ -63,10 +63,6 @@ public:
         isOn() ? off() : on();
     }
 
-    static void set(bool _on) {
-        _on ? on() : off();
-    }
-
     static bool isOn() {
 #ifdef HAS_SCHTASK
         return isOn_reg() || ScheduledTask::queryTask(SCHTASK_NAME);

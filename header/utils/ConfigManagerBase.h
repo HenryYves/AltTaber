@@ -24,10 +24,6 @@ public:
         settings.setValue(key, value);
     }
 
-    void remove(QAnyStringView key) {
-        settings.remove(key);
-    }
-
     /// Writes any unsaved changes to permanent storage, and reloads any settings that have been changed in the meantime by another application.
     void sync() {
         // This function is called automatically from QSettings's destructor and by the event loop at regular intervals,

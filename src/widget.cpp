@@ -834,12 +834,10 @@ void Widget::updateThumbnail() {
     SetWindowPos(hostHwnd, HWND_TOPMOST, physX, physY, physW, physH, SWP_NOACTIVATE);
     applyThumbnailHostRegion();
 
-    // 源 hwnd 未变则跳过注册（setSource() 自己也会短路，这里省掉一次调用）
-    if (thumbnail_->source() != source) {
-        if (!thumbnail_->setSource(source)) {
-            hideThumbnail();   // 注册失败只静默降级为不显示，不影响窗口切换
-            return;
-        }
+    // setSource() 自己会对相同源短路；外层不再重复判断
+    if (!thumbnail_->setSource(source)) {
+        hideThumbnail();   // 注册失败只静默降级为不显示，不影响窗口切换
+        return;
     }
 
     // 宿主客户区就是预览区：物理像素矩形直接交给 DWM

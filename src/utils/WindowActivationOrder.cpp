@@ -44,7 +44,3 @@ QList<HWND> WindowActivationOrder::orderedWindowsOf(const QString& exePath) cons
     sortByActiveOrder(windows, exePath);
     return windows;
 }
-
-void WindowActivationOrder::clear() {
-    order_.clear();
-}

@@ -75,7 +75,7 @@ private:
 
             static auto text = act_startup->text();
             if (IsUserAnAdmin() && !Startup::isOn_reg())
-                act_startup->setText(text + "🔑️"); // 意味着接下来的操作需要管理员权限（操作schtask）
+                act_startup->setText(text + " (admin)"); // 意味着接下来的操作需要管理员权限（操作schtask）
             else
                 act_startup->setText(text);
         });

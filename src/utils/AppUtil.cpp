@@ -15,19 +15,6 @@
 #include <QFileInfo>
 
 namespace AppUtil {
-    /// 对Core子窗口进行hwnd之类的操作之后，就会脱离原本的ApplicationFrameWindow，所以很难通过关联性去查找了<br>
-    /// 这种情况下，通过标题和类名比较好<br>
-    /// 这里需要查找Frame窗口的原因是，restore等操作只能对其生效！
-    HWND getAppFrameWindow(HWND hwnd) {
-        auto className = Util::getClassName(hwnd);
-        if (className == AppFrameWindowClass) return hwnd;
-        auto title = Util::getWindowTitle(hwnd);
-        if (auto res = FindWindowW(LPCWSTR(AppFrameWindowClass.utf16()), LPCWSTR(title.utf16())))
-            return res;
-        qWarning() << "Failed to find ApplicationFrameWindow of " << title << hwnd;
-        return nullptr;
-    }
-
     HWND getAppCoreWindow(HWND hwnd) {
         auto className = Util::getClassName(hwnd);
         if (className == AppCoreWindowClass) return hwnd;

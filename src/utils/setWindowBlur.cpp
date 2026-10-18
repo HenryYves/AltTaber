@@ -15,7 +15,3 @@ void setWindowAccent(HWND hWnd, bool blur) {
         }
     }
 }
-
-void setWindowBlur(HWND hWnd) {
-    setWindowAccent(hWnd, true);
-}

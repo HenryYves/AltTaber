@@ -66,14 +66,6 @@ void GroupWindowList::clear() {
     list_->clear();
 }
 
-int GroupWindowList::count() const {
-    return list_->count();
-}
-
-int GroupWindowList::currentRow() const {
-    return list_->currentRow();
-}
-
 void GroupWindowList::setCurrentRow(int row) {
     if (list_->count() == 0) return;
     list_->setCurrentRow(qBound(0, row, list_->count() - 1));

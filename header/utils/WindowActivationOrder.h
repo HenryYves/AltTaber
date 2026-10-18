@@ -23,15 +23,13 @@ public:
     /// 注意它**不会**继续往下找"下一个有记录的窗口"——只看第一名，哪怕后面的窗口有记录也不看。
     QPair<HWND, QDateTime> lastValidActive(const QString& exePath, const QList<HWND>& windows) const;
 
-    /// 按活跃时间倒序重排 windows；该进程没有任何记录时**保持原顺序不动**
-    void sortByActiveOrder(QList<HWND>& windows, const QString& exePath) const;
-
     /// 该进程当前所有有效窗口，按活跃时间倒序
     QList<HWND> orderedWindowsOf(const QString& exePath) const;
 
-    void clear();
-
 private:
+    /// 按活跃时间倒序重排 windows；该进程没有任何记录时**保持原顺序不动**
+    void sortByActiveOrder(QList<HWND>& windows, const QString& exePath) const;
+
     /// exePath -> (HWND, time)
     QHash<QString, QHash<HWND, QDateTime>> order_;
 };

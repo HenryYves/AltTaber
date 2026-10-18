@@ -25,8 +25,6 @@ public:
     /// 只关闭可见性，保留注册；之后 setDestinationRect() 可重新显示。
     void hide();
 
-    [[nodiscard]] HWND source() const { return source_; }
-
 private:
     void unregister();
 

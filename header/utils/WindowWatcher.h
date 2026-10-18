@@ -23,7 +23,6 @@ public:
     void start();
     /// 停止轮询并清空已知集合
     void stop();
-    bool isRunning() const { return timer_.isActive(); }
 
 signals:
     void newWindowsFound(const QList<HWND>& added);

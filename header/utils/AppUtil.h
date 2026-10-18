@@ -5,7 +5,6 @@
 #include <QIcon>
 
 namespace AppUtil {
-    HWND getAppFrameWindow(HWND hwnd);
     HWND getAppCoreWindow(HWND hwnd);
     bool isAppFrameWindow(HWND hwnd);
     QIcon getAppIcon(const QString& path);
