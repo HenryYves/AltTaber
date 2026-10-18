@@ -39,22 +39,6 @@ UIElement UIAutomation::getElementUnderMouse() {
     return UIElement{pElement};
 }
 
-UIElement UIAutomation::getParentWithHWND(const UIElement& element) {
-    IUIAutomationElement* pParent = nullptr;
-    IUIAutomationElement* pElement = element.inner();
-    IUIAutomationTreeWalker* pTreeWalker = nullptr;
-    if (SUCCEEDED(pAutomation->get_ControlViewWalker(&pTreeWalker))) {
-        UIA_HWND hwnd = nullptr;
-        do {
-            pTreeWalker->GetParentElement(pElement, &pParent);
-            pParent->get_CurrentNativeWindowHandle(&hwnd);
-            pElement = pParent;
-        } while (pElement && !hwnd);
-        pTreeWalker->Release();
-    }
-    return UIElement{pParent};
-}
-
 void UIAutomation::cleanup() {
     if (pAutomation) {
         pAutomation->Release();
@@ -88,46 +72,6 @@ QString UIElement::getClassName() const {
         qWarning() << "Failed to get class name." << hr;
     }
     return res;
-}
-
-QRect UIElement::getBoundingRect() const {
-    if (!pElement) return {};
-
-    RECT rect;
-    pElement->get_CurrentBoundingRectangle(&rect);
-    return {rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top};
-}
-
-CONTROLTYPEID UIElement::getControlType() const {
-    if (!pElement) return 0;
-
-    CONTROLTYPEID type;
-    pElement->get_CurrentControlType(&type);
-    return type;
-}
-
-HWND UIElement::getNativeWindowHandle() const {
-    if (!pElement) return nullptr;
-
-    UIA_HWND hwnd;
-    pElement->get_CurrentNativeWindowHandle(&hwnd);
-    return (HWND) hwnd;
-}
-
-QString UIElement::getNativeWindowClass() const {
-    if (!pElement) return {};
-
-    HWND hwnd = getNativeWindowHandle();
-    return Util::getClassName(hwnd);
-}
-
-QString UIElement::getSelfOrParentNativeWindowClass() const {
-    if (!pElement) return {};
-
-    HWND hwnd = getNativeWindowHandle();
-    if (!hwnd)
-        hwnd = UIAutomation::getParentWithHWND(*this).getNativeWindowHandle();
-    return Util::getClassName(hwnd);
 }
 
 QString UIElement::getAutomationId() const {

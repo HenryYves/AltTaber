@@ -3,7 +3,6 @@
 
 #include <UIAutomation.h>
 #include <QString>
-#include <QRect>
 #include <QDebug>
 
 class UIElement; // forward declaration
@@ -17,8 +16,6 @@ class UIAutomation final {
 
 public:
     static UIElement getElementUnderMouse();
-    // 获取第一个有HWND的父元素
-    static UIElement getParentWithHWND(const UIElement& element);
     static void cleanup();
 
 private:
@@ -56,16 +53,8 @@ public:
 
     bool isValid() const { return pElement != nullptr; }
 
-    IUIAutomationElement* inner() const { return pElement; }
-
     QString getName() const;
     QString getClassName() const;
-    QRect getBoundingRect() const;
-    CONTROLTYPEID getControlType() const; // e.g.`UIA_PaneControlTypeId`
-    HWND getNativeWindowHandle() const;
-    QString getNativeWindowClass() const;
-    // 如果自身的HWND为空，则循环查找HWND不为空的父元素的ClassName
-    QString getSelfOrParentNativeWindowClass() const;
     QString getAutomationId() const;
 
 private:
