@@ -51,10 +51,14 @@ public:
 
     /// 多屏切换行为，越界值回退到 AllKeepPosition
     MonitorSwitchMode getMonitorSwitchMode() {
-        auto mode = get("monitor/switch_mode", MonitorSwitchMode::AllKeepPosition).toInt();
-        if (mode < MonitorSwitchMode::AllKeepPosition || mode > MonitorSwitchMode::AllMoveToCurrent) {
-            qWarning() << "Invalid monitor/switch_mode enum" << mode;
-            mode = MonitorSwitchMode::AllKeepPosition;
+        const auto raw = get("monitor/switch_mode", static_cast<int>(MonitorSwitchMode::AllKeepPosition));
+        bool ok = false;
+        const int mode = raw.toString().toInt(&ok);
+        // 非整数字符串（例如 `current`）以前会经 toInt() 静默变成 0，看起来像配对了；
+        // 现在显式告警并回退（s02 回执 2026-10-17）
+        if (!ok || mode < MonitorSwitchMode::AllKeepPosition || mode > MonitorSwitchMode::AllMoveToCurrent) {
+            qWarning() << "Invalid monitor/switch_mode" << raw << "— falling back to 0 (all screens, keep position)";
+            return MonitorSwitchMode::AllKeepPosition;
         }
         return static_cast<MonitorSwitchMode>(mode);
     }

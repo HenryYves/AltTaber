@@ -1,6 +1,6 @@
 # AltTaber Configuration Guide
 
-`config.ini` lives next to `AltTaber.exe`. It is created automatically when you click **Settings** in the tray icon menu. Changes take effect after restarting AltTaber.
+`config.ini` lives next to `AltTaber.exe`. It is created automatically when you click **Settings** in the tray icon menu. Saving the file applies font settings immediately; display and switching settings take effect on the next switcher popup.
 
 ---
 

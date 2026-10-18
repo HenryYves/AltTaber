@@ -267,7 +267,9 @@ namespace Util {
             "Windows.UI.Core.CoreWindow", // 过滤UWP Core，从Frame入手
             "CEF-OSC-WIDGET",
             "WorkerW", // explorer.exe
-            "Shell_TrayWnd" // explorer.exe
+            "Shell_TrayWnd", // explorer.exe
+            "Ghost" // 应用未响应时 DWM 创建的窗口重影（dwm.exe，标题带"未响应"），
+                     // 它不属于被挂起的应用，收进切换器会多出一个"窗口管理器"幽灵项
         };
         static const QStringList BlackList_ExePath = {
             R"(C:\Windows\System32\wscript.exe)"

@@ -493,7 +493,7 @@ bool Widget::layoutForCurrentMode() {
         lw->hide();
         ui->label->hide();
         auto* view = groupList_->widget();
-        const bool thumbOn = cfg.getGroupThumbnailEnabled();
+        bool thumbOn = cfg.getGroupThumbnailEnabled();
         const QSize thumbBox = thumbOn ? thumbnailBoxSize() : QSize();
         const int thumbBoxW = thumbBox.width();
         const int thumbBoxH = thumbBox.height();
@@ -503,9 +503,16 @@ bool Widget::layoutForCurrentMode() {
         // 缩略图开启时，屏幕兜底还要扣掉缩略图盒与间距，否则「列表 + 缩略图」整体会超出屏幕
         if (auto* screen = targetScreen()) {
             const auto avail = screen->availableGeometry().width();
-            int cap = avail - ListWidgetMargin.left() - ListWidgetMargin.right();
+            const int availContentW = avail - ListWidgetMargin.left() - ListWidgetMargin.right();
+            int cap = availContentW;
             if (thumbOn) cap -= thumbBoxW + ThumbnailGap;
             groupList_->setWidthCap(qMax(GroupWindowList::MinWidth, cap));
+            // 屏幕窄到连「列表下限 + 间距 + 缩略图」都放不下时，整块隐藏缩略图；
+            // 绝不把缩略图钳到右缘压在列表上（用户 2026-10-18 的决策）
+            if (thumbOn && GroupWindowList::MinWidth + ThumbnailGap + thumbBoxW > availContentW) {
+                thumbOn = false;
+                qWarning() << "Thumbnail hidden: not enough horizontal room";
+            }
         }
         const QSize listSize = groupList_->preferredSize();
         view->setFixedSize(listSize);
@@ -640,8 +647,9 @@ void Widget::updateThumbnail() {
     }
 
     const HWND source = groupList_->currentHwnd();
-    // 最小化 / cloaked 的源窗口 DWM 没有可靠内容，宁可隐藏
-    if (!source || IsIconic(source) || Util::isWindowCloaked(source)) {
+    // cloaked 的源窗口 DWM 没有可靠内容，隐藏；最小化窗口仍然显示预览 ——
+    // 用户 2026-10-18 的决定：这块预览就是用来帮忙找窗口的，最小化的也要能看到
+    if (!source || Util::isWindowCloaked(source)) {
         hideThumbnail();
         return;
     }
@@ -1017,16 +1025,26 @@ bool Widget::requestShowGroup() {
     if (exePath.isEmpty()) return false;
 
     auto order = winActiveOrder_.orderedWindowsOf(exePath);
+    // 多屏选项 1：与 enterGroupMode()/orderedGroupWindows() 用同一块屏幕过滤；
+    // 否则当前屏幕与前台窗口不在同一屏时，初始高亮会按一个列表里根本不存在的下标算（用户 2026-10-18 的决策）
+    if (cfg.getMonitorSwitchMode() == MonitorSwitchMode::CurrentOnly) {
+        if (const HMONITOR targetMonitor = Util::screenHandle(targetScreen())) {
+            QList<HWND> filtered;
+            for (auto hwnd: order)
+                if (Util::monitorOfWindow(hwnd) == targetMonitor) filtered << hwnd;
+            order = filtered;
+        }
+    }
     if (order.isEmpty()) return false;
 
     // 初始高亮 = 旧盲切的目标：前台窗口下标 +1（Shift 则 -1），端点循环。
     // 用下标算，不假设"前台窗口一定排首行"——那样高亮会偏。
+    // 前台窗口不在过滤后的列表里（跨屏）时落到第 0 行，而不是把不存在的下标当 0 再 +1
     const int n = order.size();
-    int idx = order.indexOf(foreWin);
-    if (idx < 0) idx = 0;                       // 前台窗口不在过滤后的列表里，退化为首行
+    const int idx = order.indexOf(foreWin);
     const bool backward = Util::isKeyPressed(VK_SHIFT);
     const int delta = backward ? -1 : 1;
-    const int initialRow = ((idx + delta) % n + n) % n;
+    const int initialRow = idx >= 0 ? ((idx + delta) % n + n) % n : 0;
 
     // 按 enterGroupMode() 的**返回值**判断，不能用 mode_ 的旧值：
     // 调用方原本可能就在 GroupMode（列表已隐藏），此时提前返回会让 mode_ 仍是 GroupMode，
@@ -1037,6 +1055,12 @@ bool Widget::requestShowGroup() {
     // 沿用 AppMode 那套防闪烁的 forceShow()（见设计文档 §2.4）。
     if (!this->isVisible())
         forceShow();
+    // 入口 A 的 layoutForCurrentMode() 在 forceShow() **之前**就调度了 60ms 缩略图定时器；
+    // 首次 show 可能超过 60ms（main.cpp 注释里记过 472ms），定时器到点时窗口还没可见，
+    // updateThumbnail() 会把这次更新当成「不在 GroupMode/不可见」而 hideThumbnail() 掉，
+    // 于是缩略图要等用户第一次换高亮才出现。show 之后重新调度一次，保证进入即显示。
+    if (this->isVisible())
+        scheduleThumbnailUpdate();
     return this->isVisible();
 }
 

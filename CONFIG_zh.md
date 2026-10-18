@@ -1,6 +1,6 @@
 # AltTaber 配置指南
 
-`config.ini` 放在 `AltTaber.exe` 同级目录下。首次点击托盘菜单 **Settings** 时会自动生成。修改后重启 AltTaber 生效。
+`config.ini` 放在 `AltTaber.exe` 同级目录下。首次点击托盘菜单 **Settings** 时会自动生成。保存后字体设置立即生效；显示与切换类设置在下一次切换器弹窗时生效。
 
 ---
 
