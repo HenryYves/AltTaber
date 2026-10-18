@@ -6,11 +6,14 @@
 #include <QListWidget>
 #include <QDebug>
 #include <QPointer>
+#include <QImage>
+#include <QColor>
 #include "utils/WindowActivationOrder.h"
 #include "utils/WindowInfo.h"
 #include "utils/GroupWindowList.h"
 #include "utils/WindowWatcher.h"
 #include "utils/DwmThumbnail.h"
+#include "utils/ConfigManager.h"
 
 struct WindowGroup;
 
@@ -99,6 +102,17 @@ private:
 
     /// 组列表的字号/字体（[group_list]）：构造时应用一次，配置被编辑后重新应用
     void setupGroupListFont();
+
+    /// 背景模式（[appearance]）：解析 auto/system/self/tint，并在需要时截取弹窗背后的画面。
+    /// 必须在弹窗 show **之前**调用（自绘模式要截到未被弹窗遮挡的桌面）。
+    void prepareBackground();
+    /// 按 effectiveBackground_ 开/关 DWM accent blur。show 之后还要再调一次：
+    /// forceShow() 的 showMinimized/showNormal 可能重置窗口合成状态
+    void applyBackgroundAccent();
+    /// 截取弹窗当前矩形背后的屏幕内容，按 blur_scale 缩放、按 blur_radius 模糊后存起来
+    void captureBackgroundSnapshot();
+    /// 系统「透明效果」开关（HKCU\...\Themes\Personalize\EnableTransparency）
+    static bool transparencyEffectsEnabled();
     /// 从组列表回到应用切换器（GroupMode 下 Tab 与 ` 都走这里）。
     /// 高亮停在「组列表所属的那个应用」上，于是"按 Tab/` 再松手 == 原地不动"，
     /// 与入口 B 的"按 ` 再松手 == 什么都不做"成对
@@ -166,6 +180,15 @@ private:
     /// 裸指针会悬空 —— 而 hideEvent 并不构成寿命上界（弹窗可以一直开着）
     QPointer<QScreen> pinnedScreen_;
     bool userNavigated_ = false;             // 本次弹出期间用户是否手动翻过列表
+    /// 本次弹出的实际背景（auto 已解析成 system 或 self）
+    BackgroundMode effectiveBackground_ = BackgroundSystem;
+    /// 自绘模糊后的弹窗背景（只存降采样后的小图，不含系统 blur）
+    QImage backgroundSnapshot_;
+    /// 截图对应的全局逻辑矩形。paint 时按它在屏幕上的原位置绘制，不随弹窗尺寸拉伸
+    /// （入口 B 从 AppMode 切到 GroupMode 时弹窗会变大，拉伸会把背景放大）
+    QRect backgroundSnapshotGlobal_;
+    /// 叠加在背景上的颜色（含 alpha），由 [appearance] 解析
+    QColor backgroundOverlay_ = QColor(20, 20, 20, 140);
 };
 
 

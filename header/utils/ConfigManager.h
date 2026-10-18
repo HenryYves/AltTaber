@@ -22,6 +22,15 @@ enum MonitorSwitchMode {
     AllMoveToCurrent = 2 // 全部移动到当前屏幕
 };
 
+/// 切换器背景：系统 DWM 模糊、自绘截图模糊、纯色半透明，或按系统「透明效果」自动选择
+/// In config.ini: [appearance] \n background=auto|system|self|tint
+enum BackgroundMode {
+    BackgroundAuto, // 系统透明开启 → system；关闭 → self
+    BackgroundSystem, // SetWindowCompositionAttribute blur
+    BackgroundSelf, // 截图 + 程序内 blur
+    BackgroundTint // 只画半透明颜色
+};
+
 class ConfigManager : public ConfigManagerBase {
     inline static const QString FileName = "config.ini";
 
@@ -83,6 +92,49 @@ public:
         bool ok = false;
         const int height = get("group_list/thumbnail_height", 180).toInt(&ok);
         return qBound(60, ok ? height : 180, 2000);
+    }
+
+    /// 背景模式。auto 读取 HKCU\...\Themes\Personalize\EnableTransparency：
+    /// 开启时用系统模糊（观感最好），关闭时用自绘模糊（不依赖系统开关）。
+    /// In config.ini: [appearance] \n background=auto
+    BackgroundMode getBackgroundMode() {
+        const auto raw = get("appearance/background", "auto").toString().trimmed().toLower();
+        if (raw == "auto") return BackgroundAuto;
+        if (raw == "system") return BackgroundSystem;
+        if (raw == "self") return BackgroundSelf;
+        if (raw == "tint") return BackgroundTint;
+        qWarning() << "Invalid appearance/background" << raw << "— falling back to auto";
+        return BackgroundAuto;
+    }
+
+    /// 自绘模式的模糊半径（逻辑像素），默认 32，钳位 1..100。
+    int getBackgroundBlurRadius() {
+        bool ok = false;
+        const int radius = get("appearance/blur_radius", 32).toInt(&ok);
+        return qBound(1, ok ? radius : 32, 100);
+    }
+
+    /// 自绘模式模糊前的缩放下采样倍数：1/2/4；越小越准、越慢。非法值回退 2。
+    int getBackgroundBlurScale() {
+        bool ok = false;
+        const int scale = get("appearance/blur_scale", 2).toInt(&ok);
+        if (!ok || (scale != 1 && scale != 2 && scale != 4)) {
+            qWarning() << "Invalid appearance/blur_scale" << scale << "— falling back to 2";
+            return 2;
+        }
+        return scale;
+    }
+
+    /// 叠加在背景上的颜色，`#RRGGBB`，默认 #141414。
+    QString getBackgroundOverlayColor() {
+        return get("appearance/overlay_color", "#141414").toString();
+    }
+
+    /// 叠加颜色的透明度 0..255，默认 140。
+    int getBackgroundOverlayOpacity() {
+        bool ok = false;
+        const int opacity = get("appearance/overlay_opacity", 140).toInt(&ok);
+        return qBound(0, ok ? opacity : 140, 255);
     }
 
     /// When enabled, apps with no usage record are sorted to the second position

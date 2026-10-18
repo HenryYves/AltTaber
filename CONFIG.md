@@ -12,6 +12,13 @@ DisplayMonitor=1
 [monitor]
 switch_mode=0
 
+[appearance]
+background=auto
+blur_radius=32
+blur_scale=2
+overlay_color=#141414
+overlay_opacity=140
+
 [label]
 font_size=10
 font_family=Microsoft YaHei UI
@@ -74,6 +81,37 @@ switch_mode=0
   - moving between screens with different scale factors is left to Windows' native `WM_DPICHANGED` path — per-monitor DPI-aware apps re-lay out at the new DPI, other apps are bitmap-stretched by DWM. AltTaber does not pre-scale the window.
 
 The key is read whenever the switcher opens, so a saved change takes effect on the **next popup**; no restart is needed.
+
+---
+
+### `[appearance]` — Switcher background
+
+Controls how the switcher popup is painted. Independent of `[label]` and `[group_list]`.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `background` | string | `auto` | `auto` = system blur when Windows transparency effects are on, self-rendered blur when off; `system` = DWM blur only; `self` = screenshot + in-app blur; `tint` = semi-transparent color only |
+| `blur_radius` | int | `32` | Blur radius in logical pixels, `1`–`100`; only used by `self` |
+| `blur_scale` | int | `2` | Downscale factor before blurring: `1` (most accurate, slowest), `2` (balanced), `4` (fastest); only used by `self` |
+| `overlay_color` | string | `#141414` | Tint painted over the background |
+| `overlay_opacity` | int | `140` | Tint opacity, `0`–`255` |
+
+```ini
+[appearance]
+background=auto
+blur_radius=32
+blur_scale=2
+overlay_color=#141414
+overlay_opacity=140
+```
+
+- `system` uses `SetWindowCompositionAttribute` with DWM blur-behind. The blur radius is fixed by Windows, and the effect depends on **Settings → Personalization → Colors → Transparency effects**. With transparency off, the accent falls back to an opaque black fill — that is exactly what `auto` avoids.
+- `self` captures the area behind the popup **before the popup is shown**, scales it down by `blur_scale`, blurs it with `blur_radius`, and paints it with the overlay tint. It does not read the Windows transparency setting. The background is a still snapshot taken when the popup appears; windows changing behind an open popup are not reflected.
+- `blur_scale` does **not** change the visual radius: the radius is scaled together with the image, so `blur_radius=32` at `blur_scale=4` uses an 8 px radius on a 1/4-size image. Smaller scale = sharper and more accurate, larger scale = faster.
+- `tint` disables blur entirely; it is the cheapest option.
+- `auto` is recommended: use the nicer system blur when Windows transparency is on, and switch to the self-rendered blur when it is off, so the popup never turns black.
+- Cost: `self` adds roughly 18–25 ms per popup on a 2560×1600 / 150% setup; `system` is composited by DWM (no in-process cost); `tint` is negligible.
+- Reads at each popup: saving the file takes effect on the next popup, no restart.
 
 ---
 

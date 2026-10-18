@@ -12,6 +12,13 @@ DisplayMonitor=1
 [monitor]
 switch_mode=0
 
+[appearance]
+background=auto
+blur_radius=32
+blur_scale=2
+overlay_color=#141414
+overlay_opacity=140
+
 [label]
 font_size=10
 font_family=Microsoft YaHei UI
@@ -74,6 +81,37 @@ switch_mode=0
   - 跨不同缩放率的屏幕时交给 Windows 原生的 `WM_DPICHANGED` 路径处理 —— per-monitor DPI aware 的应用按新 DPI 重新布局，其余应用由 DWM 位图拉伸，AltTaber 不预先缩放窗口。
 
 该键在每次打开切换器时读取，保存后**下次弹窗**即生效，不需要重启。
+
+---
+
+### `[appearance]` — 切换器背景
+
+控制切换器弹窗的背景怎么画。与 `[label]`、`[group_list]` 独立。
+
+| 键 | 类型 | 默认值 | 说明 |
+|-----|------|--------|------|
+| `background` | string | `auto` | `auto` = 系统「透明效果」开启时用系统模糊、关闭时用自绘模糊；`system` = 只用 DWM 模糊；`self` = 截图 + 程序内模糊；`tint` = 只画半透明颜色 |
+| `blur_radius` | int | `32` | 模糊半径（逻辑像素），`1`–`100`；仅 `self` 使用 |
+| `blur_scale` | int | `2` | 模糊前缩放倍数：`1` 最准最慢、`2` 折中、`4` 最快；仅 `self` 使用 |
+| `overlay_color` | string | `#141414` | 叠加在背景上的颜色 |
+| `overlay_opacity` | int | `140` | 叠加颜色的透明度，`0`–`255` |
+
+```ini
+[appearance]
+background=auto
+blur_radius=32
+blur_scale=2
+overlay_color=#141414
+overlay_opacity=140
+```
+
+- `system` 走 `SetWindowCompositionAttribute` 的 DWM 模糊。模糊半径由 Windows 固定，效果取决于**设置 → 个性化 → 颜色 → 透明效果**；关闭透明时 accent 会退化成不透明黑色，`auto` 就是为了避开这一点。
+- `self` 在弹窗**显示之前**截取它背后的画面，按 `blur_scale` 缩小、按 `blur_radius` 模糊，再叠 `overlay_color` / `overlay_opacity`。它完全不读系统透明开关。背景是弹出那一刻的静态快照；弹窗开着时背后窗口的变化不会反映。
+- `blur_scale` **不改变视觉半径**：半径会跟图片一起缩放，`blur_radius=32` 配 `blur_scale=4` 相当于在 1/4 图上用 8px 半径。缩得越小越准、越慢；缩得越大越快。
+- `tint` 完全不模糊，只叠颜色，开销最低。
+- 推荐 `auto`：系统透明开着时用观感更好的系统模糊，关着时自动切自绘，不会黑。
+- 开销：`self` 在 2560×1600 / 150% 环境下每次弹出约 18–25 ms；`system` 由 DWM 合成，进程内几乎为零；`tint` 可忽略。
+- 每次弹窗读取；保存后下次弹窗生效，不需要重启。
 
 ---
 

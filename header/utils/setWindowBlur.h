@@ -37,6 +37,7 @@ typedef struct _WINDOWCOMPOSITIONATTRIBDATA {
 } WINDOWCOMPOSITIONATTRIBDATA;
 
 typedef enum _ACCENT_STATE {
+    ACCENT_DISABLED = 0, // 关掉 accent（自绘 / 纯色背景必须用）
     ACCENT_ENABLE_GRADIENT = 1,
     ACCENT_ENABLE_TRANSPARENTGRADIENT = 2,
     ACCENT_ENABLE_BLURBEHIND = 3,
@@ -54,5 +55,9 @@ typedef struct _ACCENT_POLICY {
 typedef BOOL(WINAPI* pfnSetWindowCompositionAttribute)(HWND, WINDOWCOMPOSITIONATTRIBDATA*);
 
 void setWindowBlur(HWND hWnd);
+
+/// 显式开关 DWM 的 blur-behind（ACCENT_ENABLE_BLURBEHIND / ACCENT_DISABLED）。
+/// 自绘背景或纯色模式必须关掉它：系统「透明效果」关闭时 accent 会退化成不透明黑色。
+void setWindowAccent(HWND hWnd, bool blur);
 
 #endif // SETWINDOWBLUR_H

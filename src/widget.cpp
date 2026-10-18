@@ -5,6 +5,10 @@
 #include <QDebug>
 #include <QWindow>
 #include <QScreen>
+#include <QSettings>
+#include <QElapsedTimer>
+#include <QPixmap>
+#include <algorithm>
 #include "utils/setWindowBlur.h"
 #include "utils/IconOnlyDelegate.h"
 #include <QPainter>
@@ -24,6 +28,51 @@ static QList<HWND> hwndsOfGroup(const WindowGroup& group) {
     QList<HWND> hwnds;
     for (auto& info: group.windows) hwnds << info.hwnd;
     return hwnds;
+}
+
+/// 可分离 box blur（水平 + 垂直各一遍，running sum）。
+/// 自绘背景用：在降采样后的小图上跑，半径按缩放倍数放大，视觉半径不变。
+static void boxBlur(QImage& img, int radius) {
+    if (radius <= 0 || img.isNull()) return;
+    const int w = img.width();
+    const int h = img.height();
+    const int d = radius * 2 + 1;
+
+    QImage tmp = img;
+    for (int y = 0; y < h; ++y) {
+        auto* src = reinterpret_cast<const QRgb*>(img.constScanLine(y));
+        auto* dst = reinterpret_cast<QRgb*>(tmp.scanLine(y));
+        long a = 0, r = 0, g = 0, b = 0;
+        for (int x = -radius; x <= radius; ++x) {
+            const QRgb c = src[std::clamp(x, 0, w - 1)];
+            a += qAlpha(c); r += qRed(c); g += qGreen(c); b += qBlue(c);
+        }
+        for (int x = 0; x < w; ++x) {
+            dst[x] = qRgba(int(r / d), int(g / d), int(b / d), int(a / d));
+            const QRgb out = src[std::clamp(x - radius, 0, w - 1)];
+            const QRgb in = src[std::clamp(x + radius + 1, 0, w - 1)];
+            a += qAlpha(in) - qAlpha(out);
+            r += qRed(in) - qRed(out);
+            g += qGreen(in) - qGreen(out);
+            b += qBlue(in) - qBlue(out);
+        }
+    }
+    for (int x = 0; x < w; ++x) {
+        long a = 0, r = 0, g = 0, b = 0;
+        for (int y = -radius; y <= radius; ++y) {
+            const QRgb c = reinterpret_cast<const QRgb*>(tmp.constScanLine(std::clamp(y, 0, h - 1)))[x];
+            a += qAlpha(c); r += qRed(c); g += qGreen(c); b += qBlue(c);
+        }
+        for (int y = 0; y < h; ++y) {
+            reinterpret_cast<QRgb*>(img.scanLine(y))[x] = qRgba(int(r / d), int(g / d), int(b / d), int(a / d));
+            const QRgb out = reinterpret_cast<const QRgb*>(tmp.constScanLine(std::clamp(y - radius, 0, h - 1)))[x];
+            const QRgb in = reinterpret_cast<const QRgb*>(tmp.constScanLine(std::clamp(y + radius + 1, 0, h - 1)))[x];
+            a += qAlpha(in) - qAlpha(out);
+            r += qRed(in) - qRed(out);
+            g += qGreen(in) - qGreen(out);
+            b += qBlue(in) - qBlue(out);
+        }
+    }
 }
 
 /// 设计文档 §2.3：GroupMode 下 Tab / 方向键 / Vim H J K L 都只是"上下移动高亮"。
@@ -54,7 +103,9 @@ Widget::Widget(QWidget* parent) : QWidget(parent), ui(new Ui::Widget) {
     setWindowTitle("AltTaber");
 
     Util::setWindowRoundCorner(this->hWnd()); // 设置窗口圆角
-    setWindowBlur(hWnd()); // 设置窗口模糊, 必须配合Qt::WA_TranslucentBackground
+    // 背景由 prepareBackground() 在每次弹出时决定：system 才开 DWM blur；
+    // self/tint 必须关掉，否则系统「透明效果」关闭时 accent 会退化成不透明黑色
+    setWindowAccent(hWnd(), false);
     Diag::setSelfHwnd(hWnd()); // 诊断日志的 selfVisible 字段用
 
     setupLabelFont();
@@ -320,8 +371,75 @@ void Widget::paintEvent(QPaintEvent*) { //不绘制会导致鼠标穿透背景
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setPen(Qt::NoPen); //取消边框//pen决定边框颜色
-    painter.setBrush(QColor(25, 25, 25, 100));
+    // 自绘模式：先铺截取并模糊后的桌面，再叠 tint；system/tint 模式只叠 tint
+    if (effectiveBackground_ == BackgroundSelf && !backgroundSnapshot_.isNull()) {
+        // 按截图时的屏幕位置绘制；弹窗变大时多出来的区域只叠 tint，不拉伸背景
+        const QPoint widgetGlobal = mapToGlobal(QPoint(0, 0));
+        const QRect target(backgroundSnapshotGlobal_.topLeft() - widgetGlobal,
+                           backgroundSnapshotGlobal_.size());
+        painter.drawImage(target, backgroundSnapshot_);
+    }
+    painter.setBrush(backgroundOverlay_);
     painter.drawRect(rect());
+}
+
+bool Widget::transparencyEffectsEnabled() {
+    QSettings settings(QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+                       QSettings::NativeFormat);
+    return settings.value(QStringLiteral("EnableTransparency"), 1).toInt() != 0;
+}
+
+void Widget::prepareBackground() {
+    effectiveBackground_ = cfg.getBackgroundMode();
+    if (effectiveBackground_ == BackgroundAuto)
+        effectiveBackground_ = transparencyEffectsEnabled() ? BackgroundSystem : BackgroundSelf;
+
+    QColor overlay(cfg.getBackgroundOverlayColor());
+    if (!overlay.isValid()) {
+        qWarning() << "Invalid appearance/overlay_color, falling back to #141414";
+        overlay = QColor(20, 20, 20);
+    }
+    overlay.setAlpha(cfg.getBackgroundOverlayOpacity());
+    backgroundOverlay_ = overlay;
+
+    backgroundSnapshot_ = QImage();
+    if (effectiveBackground_ == BackgroundSelf)
+        captureBackgroundSnapshot();
+    qDebug() << "Background mode" << int(effectiveBackground_)
+             << (backgroundSnapshot_.isNull() ? "(no snapshot)" : "(snapshot ready)");
+}
+
+void Widget::applyBackgroundAccent() {
+    setWindowAccent(hWnd(), effectiveBackground_ == BackgroundSystem);
+}
+
+void Widget::captureBackgroundSnapshot() {
+    auto* screen = targetScreen();
+    if (!screen) return;
+    const QRect globalRect = this->geometry();
+    if (globalRect.isEmpty()) return;
+    backgroundSnapshotGlobal_ = globalRect;
+    const QRect local = globalRect.translated(-screen->geometry().topLeft());
+
+    QElapsedTimer timer;
+    timer.start();
+    const QPixmap pm = screen->grabWindow(0, local.x(), local.y(), local.width(), local.height());
+    if (pm.isNull()) {
+        qWarning() << "Background capture failed";
+        return;
+    }
+    QImage img = pm.toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    const int scale = cfg.getBackgroundBlurScale();
+    const int radiusLogical = cfg.getBackgroundBlurRadius();
+    const qreal dpr = this->devicePixelRatioF();
+    // 截到的是物理像素；半径按 DPR 换算到物理，再按缩放倍数换算到小图
+    const int radius = qMax(1, qRound(radiusLogical * dpr / scale));
+    QImage blurred = img.scaled(qMax(1, img.width() / scale), qMax(1, img.height() / scale),
+                                Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    boxBlur(blurred, radius);
+    backgroundSnapshot_ = blurred;
+    qDebug() << "Background snapshot" << img.size() << "->" << blurred.size()
+             << "scale" << scale << "radius" << radius << "in" << timer.elapsed() << "ms";
 }
 
 /// 通知前台窗口变化
@@ -766,7 +884,11 @@ bool Widget::requestShow() { // TODO 当前台是开始菜单（Win）时，会�
         if (auto fg = GetForegroundWindow(); fg != this->hWnd() && Util::isWindowAcceptable(fg))
             foregroundAtShow_ = fg;
     }
-    const bool shown = prepareListWidget() && forceShow();
+    // 自绘背景必须在 show 之前截屏；system/tint 模式在 prepareBackground() 里只解析开关
+    const bool prepared = prepareListWidget();
+    if (prepared) prepareBackground();
+    const bool shown = prepared && forceShow();
+    if (shown) applyBackgroundAccent();
 
     // 判据是"列表此刻在不在屏幕上"，不是 forceShow() 的返回值 —— 后者只表示"抢到前台"。
     // main.cpp:77-88 的 retry 循环最多试 5 次，可能**窗口已可见**却没抢到前台就放弃；
@@ -1059,10 +1181,14 @@ bool Widget::requestShowGroup() {
     // 于是 forceShow() 会把上一条遗留的列表显示出来（且松手还会提交那行）
     if (!enterGroupMode(exePath, initialRow)) return false;
 
+    // 入口 A 的窗口原本是隐藏的：截屏要在 show 之前，否则截到的是弹窗自己
+    prepareBackground();
+
     // 几何算完还得真正把窗口显示出来：情形 A 的切换器原本是隐藏的，
     // 沿用 AppMode 那套防闪烁的 forceShow()（见设计文档 §2.4）。
     if (!this->isVisible())
         forceShow();
+    applyBackgroundAccent();
     // 入口 A 的 layoutForCurrentMode() 在 forceShow() **之前**就调度了 60ms 缩略图定时器；
     // 首次 show 可能超过 60ms（main.cpp 注释里记过 472ms），定时器到点时窗口还没可见，
     // updateThumbnail() 会把这次更新当成「不在 GroupMode/不可见」而 hideThumbnail() 掉，
