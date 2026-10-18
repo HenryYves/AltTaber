@@ -3,6 +3,7 @@
 #include "utils/uiautomation.h"
 #include "utils/AppUtil.h"
 #include "utils/Util.h"
+#include "utils/Diag.h"
 #include <QTime>
 
 LRESULT mouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
@@ -17,6 +18,7 @@ LRESULT mouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
             if (el.getClassName() == "CEF-OSC-WIDGET") { // Nvidia Overlay
                 // 当所有窗口最小化后，会出现这种情况，但是焦点和前台都不是他，离谱
                 qDebug() << "detect CEF, try active taskbar";
+                Diag::log("#SWITCH", topLevelHwnd);
                 Util::switchToWindow(topLevelHwnd, true); // 只能通过变焦到Taskbar使Element正常检测
                 el = std::move(UIAutomation::getElementUnderMouse());
                 qDebug() << (el.getClassName() != "CEF-OSC-WIDGET" ? "successful!" : "failed");
@@ -61,11 +63,25 @@ TaskbarWheelHooker::TaskbarWheelHooker() {
                 if (h_mouse == nullptr)
                     qCritical() << "Failed to install h_mouse";
                 qDebug() << "#Enter Taskbar" << QTime::currentTime();
+                Diag::log("#TB_ENTER", topLevelHwnd);
             } else {
                 UnhookWindowsHookEx(h_mouse);
                 h_mouse = nullptr;
                 qDebug() << "#Leave Taskbar" << QTime::currentTime();
+                Diag::log("#TB_LEAVE", topLevelHwnd);
                 emit leaveTaskbar();
+            }
+        }
+
+        // 诊断：任务栏缩略图窗口（TaskListThumbnailWnd）可见性变化。只在开启诊断时轮询，
+        // 平时（ALTTABER_DIAG 未设置）不额外枚举窗口
+        if (Diag::enabled()) {
+            static bool lastThumbVisible = false;
+            const HWND thumbnail = Util::getCurrentTaskListThumbnailWnd();
+            const bool thumbVisible = thumbnail && IsWindowVisible(thumbnail);
+            if (thumbVisible != lastThumbVisible) {
+                lastThumbVisible = thumbVisible;
+                Diag::log("#THUMB", thumbnail);
             }
         }
     });

@@ -50,6 +50,9 @@ add_executable(Win_Switcher src/main.cpp
         header/utils/Util.h
         header/utils/setWindowBlur.h
         src/utils/setWindowBlur.cpp
+        src/utils/DwmThumbnail.cpp
+        header/utils/DwmThumbnail.h
+        header/utils/Diag.h
         src/utils/IconOnlyDelegate.cpp
         header/utils/IconOnlyDelegate.h
         header/utils/uiautomation.h
@@ -68,6 +71,13 @@ add_executable(Win_Switcher src/main.cpp
         header/utils/SystemTray.h
         header/utils/ConfigManager.h
         header/utils/ConfigManagerBase.h
+        src/utils/GroupWindowList.cpp
+        header/utils/GroupWindowList.h
+        header/utils/WindowInfo.h
+        src/utils/WindowActivationOrder.cpp
+        header/utils/WindowActivationOrder.h
+        src/utils/WindowWatcher.cpp
+        header/utils/WindowWatcher.h
         src/UpdateDialog.cpp
         header/UpdateDialog.h
         ui/UpdateDialog.ui
@@ -102,4 +112,21 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 
 if (MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE "/utf-8")
+endif ()
+
+# ---- 单元测试：纯 C++，不依赖 Qt ----
+add_executable(WindowDiffTests tests/window_diff_tracker_test.cpp)
+set_target_properties(WindowDiffTests PROPERTIES
+        AUTOMOC OFF AUTOUIC OFF AUTORCC OFF
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/$<CONFIG>")
+if (MSVC)
+    target_compile_options(WindowDiffTests PRIVATE "/utf-8")
+endif ()
+
+add_executable(WindowGeometryTests tests/window_geometry_test.cpp)
+set_target_properties(WindowGeometryTests PROPERTIES
+        AUTOMOC OFF AUTOUIC OFF AUTORCC OFF
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/$<CONFIG>")
+if (MSVC)
+    target_compile_options(WindowGeometryTests PRIVATE "/utf-8")
 endif ()

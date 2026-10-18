@@ -7,10 +7,14 @@
 #include <dwmapi.h>
 #include <QElapsedTimer>
 
+class QScreen;
+
 namespace Util {
     QString getWindowTitle(HWND hwnd);
     QString getClassName(HWND hwnd);
     bool isWindowElevated(HWND hwnd);
+    /// DWM 层面是否被 cloaked（虚拟桌面/挂起窗口）。与 IsWindowVisible 需同时判断
+    bool isWindowCloaked(HWND hwnd);
     QString getWindowProcessPath(HWND hwnd);
     QList<QString> getChildProcessPaths(const QString& exePath);
     QString getFileDescription(const QString& path);
@@ -33,6 +37,13 @@ namespace Util {
     POINT getCursorPos();
     HWND getCurrentTaskListThumbnailWnd();
     bool isTaskbarWindow(HWND hwnd);
+    /// 获取 QScreen 对应的 Win32 屏幕句柄（HMONITOR）；取不到返回 nullptr
+    HMONITOR screenHandle(QScreen* screen);
+    /// 窗口所在（或最近）屏幕的 HMONITOR
+    HMONITOR monitorOfWindow(HWND hwnd);
+    /// 把窗口搬到目标屏幕的工作区并居中（多屏选项 2：AllMoveToCurrent）。
+    /// 已在目标屏幕、句柄/监视器无效时直接返回；最大化窗口先还原、移动后再最大化。
+    void moveWindowToMonitor(HWND hwnd, HMONITOR target);
 } // Util
 
 #endif //WIN_SWITCHER_UTIL_H
