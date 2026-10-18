@@ -1,7 +1,6 @@
 #include "utils/uiautomation.h"
 #include <windows.h>
 #include <QDebug>
-#include "utils/Util.h"
 
 IUIAutomation* UIAutomation::pAutomation = nullptr;
 

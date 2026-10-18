@@ -197,6 +197,24 @@ static int main_impl() {
         check(!c.thumbnailActive, "groupContent: zero box cannot become active");
         check(c.contentWidth == 0 && c.contentHeight == 0, "groupContent: zero inputs stay zero");
     }
+    {
+        // 阈值恰好命中：220 + 12 + 320 = 552
+        auto c = WindowGeometry::groupContent(300, 120, 320, 180, 12, 220, 552, true);
+        check(c.thumbnailActive && c.contentWidth == 300 + 12 + 320,
+              "groupContent: exactly 552 available width activates the thumbnail");
+    }
+    {
+        // 阈值差一个像素：551
+        auto c = WindowGeometry::groupContent(300, 120, 320, 180, 12, 220, 551, true);
+        check(!c.thumbnailActive && c.contentWidth == 300,
+              "groupContent: 551 available width keeps the thumbnail inactive");
+    }
+    {
+        // 负的列表宽高按 0 处理：contentWidth 只剩 gap + box；listY 以 0 高居中
+        auto c = WindowGeometry::groupContent(-50, -30, 320, 180, 12, 220, 1600, true);
+        check(c.contentWidth == 12 + 320 && c.listY == 90,
+              "groupContent: negative list width and height clamp to zero");
+    }
 
     return g_failed == 0 ? 0 : 1;
 }
