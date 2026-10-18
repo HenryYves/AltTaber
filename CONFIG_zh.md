@@ -19,6 +19,9 @@ font_family=Microsoft YaHei UI
 [group_list]
 font_size=13
 font_family=方正清刻本悦宋简体
+thumbnail=true
+thumbnail_width=320
+thumbnail_height=180
 
 [blacklist]
 file_names=obsidian.exe, slack.exe
@@ -124,7 +127,9 @@ thumbnail_height=180
 - 只取源窗口的**客户区**，所以没有标题栏、也没有窗口边框。（应用自绘的标题栏属于客户区，会照常显示。）
 - 预览按**等比缩放**放进 `thumbnail_width` × `thumbnail_height` 的盒子。盒子是上限而非强制尺寸：宽窗口的预览更矮，高窗口的预览更窄。盒子还会再受目标屏幕可用区域兜底，配置得再大也不会把弹窗顶出屏幕。
 - 只在 Alt+`` ` `` **组列表**里显示，Alt+Tab 应用列表不受影响。
-- **最小化窗口不显示预览**（DWM 拿不到可靠内容），但仍照常列出、可选。被 DWM cloaked 的窗口同理。
+- **最小化窗口也显示预览**，这样列表仍能帮你认出最小化的窗口。被 DWM cloaked 的窗口、以及取不到客户区尺寸的源窗口不显示预览。
+- 预览宿主与弹窗使用**同一套圆角**（Win11 走 DWM 圆角；旧版 Windows 回退 `SetWindowRgn`）。
+- 屏幕窄到放不下「列表 + 预览」时，预览**整块隐藏**，绝不压住列表。
 - `thumbnail` 为 `false` 时，`thumbnail_width` / `thumbnail_height` 不起作用。
 - 默认 `thumbnail=false`：不注册预览、不预留空间，布局、尺寸与观感**与旧版逐像素一致**。
 

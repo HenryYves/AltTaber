@@ -19,6 +19,9 @@ font_family=Microsoft YaHei UI
 [group_list]
 font_size=13
 font_family=方正清刻本悦宋简体
+thumbnail=true
+thumbnail_width=320
+thumbnail_height=180
 
 [blacklist]
 file_names=obsidian.exe, slack.exe
@@ -124,7 +127,9 @@ thumbnail_height=180
 - Only the **client area** of the source window is captured — no title bar and no window border. (A title bar drawn by the app itself is part of the client area and will show.)
 - The preview is scaled **proportionally** to fit inside the `thumbnail_width` × `thumbnail_height` box. The box is an upper bound, not a forced size, so wide windows get a shorter preview and tall windows a narrower one. The box itself is further clamped to the target screen's available area, so an oversized configuration cannot push the popup off-screen.
 - It is shown **only in the Alt+`` ` `` group list**; the Alt+Tab app list is unaffected.
-- **Minimized windows show no preview** (DWM has no reliable content for them); they are still listed and selectable. The same applies to DWM-cloaked windows.
+- **Minimized windows also get a preview**, so the list still helps you recognize windows that are minimized. DWM-cloaked windows, and sources whose client area cannot be queried, hide the preview.
+- The preview host gets the **same rounded corners as the popup** (Win11 DWM corner preference; `SetWindowRgn` fallback on older Windows).
+- If the screen is too narrow to fit the list plus the preview, the preview is **hidden entirely** — it never overlaps the list.
 - `thumbnail_width` and `thumbnail_height` have no effect while `thumbnail` is `false`.
 - With `thumbnail=false` (the default), no preview is registered and no space is reserved: layout, sizes and appearance are **pixel-identical to previous versions**.
 
