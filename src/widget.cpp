@@ -687,10 +687,18 @@ void Widget::updateThumbnail() {
                                 (this->height() - contentSize.height()) / 2);
     const QPoint globalLogical = mapToGlobal(contentTopLeft + QPoint(thumbRect.x, thumbRect.y));
 
-    // DWM 目的地与 Win32 窗口坐标都是**物理像素**（f3）：逻辑坐标 × devicePixelRatioF()
+    // DWM 目的地与 Win32 窗口坐标都是**物理像素**（f3）。
+    // 不能把 Qt 的全局逻辑坐标直接乘 devicePixelRatioF()：多屏时 Qt 的逻辑坐标是各屏按自己的
+    // DPR 拼接出来的，副屏原点/缩放率不同就会算偏（2026-10-18 副屏实测）。
+    // 改用主弹窗的**客户区物理原点** + 窗口自身 DPR 换算，与屏幕拓扑、缩放率无关。
+    POINT clientOrigin{0, 0};
+    if (!ClientToScreen(this->hWnd(), &clientOrigin)) {
+        hideThumbnail();
+        return;
+    }
     const qreal dpr = this->devicePixelRatioF();
-    const int physX = qRound(globalLogical.x() * dpr);
-    const int physY = qRound(globalLogical.y() * dpr);
+    const int physX = clientOrigin.x + qRound((contentTopLeft.x() + thumbRect.x) * dpr);
+    const int physY = clientOrigin.y + qRound((contentTopLeft.y() + thumbRect.y) * dpr);
     const int physW = qRound(thumbRect.width * dpr);
     const int physH = qRound(thumbRect.height * dpr);
     if (physW <= 0 || physH <= 0) {
