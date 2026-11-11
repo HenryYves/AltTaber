@@ -1242,6 +1242,14 @@ void Widget::exitGroupModeToApp() {
     userNavigated_ = false;   // 新的一屏交互，自动选中可以重新接管（与 requestShow() 一致）
     groupList_->clear();      // 内容下次进入时会重新填充
 
+    // 重新渲染应用列表。入口 A（Alt+` 直接按下）只填了组列表，从没跑过
+    // prepareListWidget()，所以 lw 里是**上一次 Alt+Tab 的旧快照**（甚至 main.cpp:40
+    // 启动时预初始化的那份）：窗口集合与「最新使用时间」排序都会过期。
+    // 这里重建一次，按当前 winActiveOrder_ 重排；下面的高亮查找必须放在重建之后。
+    const bool rebuilt = prepareListWidget();
+    if (!rebuilt)
+        qWarning() << "exitGroupModeToApp: prepareListWidget failed";
+
     if (!exePath.isEmpty()) {
         for (int i = 0; i < lw->count(); ++i) {
             if (lw->item(i)->data(Qt::UserRole).value<WindowGroup>().exePath == exePath) {
@@ -1251,8 +1259,9 @@ void Widget::exitGroupModeToApp() {
         }
     }
     // 回到 AppMode 的几何。失败（取不到屏幕）时不动 mode_：与 enterGroupMode() 的收尾不同，
-    // 这里退回 GroupMode 反而会留下"隐藏着的组列表"，不如就地停在 AppMode（列表仍是可见的）
-    if (!layoutForCurrentMode())
+    // 这里退回 GroupMode 反而会留下"隐藏着的组列表"，不如就地停在 AppMode（列表仍是可见的）。
+    // 重建成功时 prepareListWidget() 内部已经算过几何，不用重复算
+    if (!rebuilt && !layoutForCurrentMode())
         qWarning() << "exitGroupModeToApp: layoutForCurrentMode failed";
     showLabelForItem(lw->currentItem());
 }
